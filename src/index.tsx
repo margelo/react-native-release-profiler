@@ -28,5 +28,5 @@ export function stopProfiling(): Promise<void> {
   if (Platform.OS !== 'android') {
     return Promise.resolve();
   }
-  return ReleaseProfiler.startProfiling();
+  return ReleaseProfiler.stopProfiling();
 }
