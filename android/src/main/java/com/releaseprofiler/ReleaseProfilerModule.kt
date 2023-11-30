@@ -14,9 +14,25 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
 
   // Example method
   // See https://reactnative.dev/docs/native-modules-android
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  fun startProfiling(Promise promise) {
+    HermesSamplingProfiler.enable();
+    promise.resolve(null)
+  }
+
   @ReactMethod
-  fun multiply(a: Double, b: Double, promise: Promise) {
-    promise.resolve(a * b)
+  fun stopProfiling(Promise promise) {
+    final String outputPath =  File.createTempFile(
+            "sampling-profiler-trace", ".cpuprofile", getApplicationContext().getCacheDir())
+        .getPath();
+    HermesSamplingProfiler.dumpSampledTraceToFile(outputPath);
+    HermesSamplingProfiler.disable();
+    Toast.makeText(
+            getApplicationContext(),
+            "Saved results from Profiler to " + outputPath,
+            Toast.LENGTH_LONG)
+        .show();
+    promise.resolve(null)
   }
 
   companion object {

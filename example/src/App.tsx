@@ -1,13 +1,19 @@
 import * as React from 'react';
 
 import { StyleSheet, View, Text } from 'react-native';
-import { multiply } from 'react-native-release-profiler';
+import { startProfiling, stopProfiling } from 'react-native-release-profiler';
+
+startProfiling()
+
+setTimout(() => {
+  stopProfiling()
+}, 10000)
 
 export default function App() {
   const [result, setResult] = React.useState<number | undefined>();
 
   React.useEffect(() => {
-    multiply(3, 7).then(setResult);
+   
   }, []);
 
   return (

@@ -17,6 +17,10 @@ const ReleaseProfiler = NativeModules.ReleaseProfiler
       }
     );
 
-export function multiply(a: number, b: number): Promise<number> {
-  return ReleaseProfiler.multiply(a, b);
+export function startProfiling(): Promise<void> {
+  return ReleaseProfiler.startProfiling();
+}
+
+export function stopProfiling(): Promise<void> {
+  return ReleaseProfiler.startProfiling();
 }
