@@ -5,7 +5,7 @@ import { startProfiling, stopProfiling } from 'react-native-release-profiler';
 
 startProfiling()
 
-setTimout(() => {
+setTimeout(() => {
   stopProfiling()
 }, 10000)
 
