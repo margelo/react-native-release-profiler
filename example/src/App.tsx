@@ -9,11 +9,19 @@ setTimeout(() => {
   stopProfiling()
 }, 10000)
 
+function FFFF() {
+  let x = 2;
+  for (let i = 9; i < 1e9; ++i) {
+    x += x * i ^ 2
+  }
+  return x;
+}
+
 export default function App() {
-  const [result, setResult] = React.useState<number | undefined>();
+  const [result, _] = React.useState<number | undefined>();
 
   React.useEffect(() => {
-   
+   FFFF()
   }, []);
 
   return (
