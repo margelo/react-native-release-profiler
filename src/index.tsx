@@ -21,6 +21,6 @@ export function startProfiling(): Boolean {
   return ReleaseProfiler.startProfiling();
 }
 
-export function stopProfiling(): Promise<void> {
-  return ReleaseProfiler.stopProfiling();
+export function stopProfiling(saveToDownloads = false): Promise<string> {
+  return ReleaseProfiler.stopProfiling(saveToDownloads);
 }
