@@ -18,15 +18,9 @@ const ReleaseProfiler = NativeModules.ReleaseProfiler
     );
 
 export function startProfiling(): Boolean {
-  if (Platform.OS !== 'android') {
-    return false;
-  }
   return ReleaseProfiler.startProfiling();
 }
 
 export function stopProfiling(): Promise<void> {
-  if (Platform.OS !== 'android') {
-    return Promise.resolve();
-  }
   return ReleaseProfiler.stopProfiling();
 }

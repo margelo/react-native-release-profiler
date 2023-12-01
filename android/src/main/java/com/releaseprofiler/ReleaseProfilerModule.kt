@@ -37,7 +37,7 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
             "Saved results from Profiler to " + outputPath,
             Toast.LENGTH_LONG)
         .show();
-    promise.resolve(null)
+    promise.resolve(outputPath)
   }
 
   companion object {

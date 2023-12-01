@@ -10823,6 +10823,7 @@ __metadata:
     pod-install: ^0.1.0
     react: 18.2.0
     react-native: 0.72.7
+    react-native-share: ^10.0.1
   languageName: unknown
   linkType: soft
 
@@ -10856,6 +10857,13 @@ __metadata:
     react-native: "*"
   languageName: unknown
   linkType: soft
+
+"react-native-share@npm:^10.0.1":
+  version: 10.0.1
+  resolution: "react-native-share@npm:10.0.1"
+  checksum: c570cb7ee62e37c99de9cdb3a68813d838955ea7fd016ee9eaf026035803c56edbf6b538349445b7b4b244e0a89eeb34964718632a7db778632c87cb5dce31b0
+  languageName: node
+  linkType: hard
 
 "react-native@npm:0.72.7":
   version: 0.72.7
