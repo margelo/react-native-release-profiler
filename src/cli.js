@@ -12,60 +12,6 @@ function _cliTools() {
   return data;
 }
 
-async function profileHermes([dstPath], ctx, options) {
-  try {
-    _cliTools().logger.info('Downloading a Hermes Sampling Profiler from your Android device...');
-    if (!options.filename) {
-      _cliTools().logger.info('No filename is provided, pulling latest file');
-    }
-    await downloadProfile(ctx, options.local, options.fromDownload, dstPath, options.filename, options.sourcemapPath, options.raw, options.generateSourcemap, options.port, options.appId, options.appIdSuffix);
-  } catch (err) {
-    throw err;
-  }
-}
-/*var _default = {
-  name: 'profile-hermes [destinationDir]',
-  description: 'Pull and convert a Hermes tracing profile to Chrome tracing profile, then store it in the directory <destinationDir> of the local machine',
-  func: profileHermes,
-  options: [{
-    name: '--filename <string>',
-    description: 'File name of the profile to be downloaded, eg. sampling-profiler-trace8593107139682635366.cpuprofile'
-  }, {
-    name: '--raw',
-    description: 'Pulls the original Hermes tracing profile without any transformation'
-  }, {
-    name: '--sourcemap-path <string>',
-    description: 'The local path to your source map file, eg. /tmp/sourcemap.json'
-  }, {
-    name: '--generate-sourcemap',
-    description: 'Generates the JS bundle and source map'
-  }, {
-    name: '--port <number>',
-    default: `${process.env.RCT_METRO_PORT || 8081}`
-  }, {
-    name: '--appId <string>',
-    description: 'Specify an applicationId to launch after build. If not specified, `package` from AndroidManifest.xml will be used.'
-  }, {
-    name: '--appIdSuffix <string>',
-    description: 'Specify an applicationIdSuffix to launch after build.'
-  }, {
-    name: '--fromDownload',
-    description: 'Specify if script should find profile in downloads directory on the phone'
-  }, {
-    name: '--local <string>',
-    description: 'Local path to hermes profile you want to transform.'
-  }],
-  examples: [{
-    desc: 'Download the Hermes Sampling Profiler to the directory <destinationDir> on the local machine',
-    cmd: 'profile-hermes /tmp'
-  }]
-};
-exports.default = _default;*/
-
-//# sourceMappingURL=index.ts.map
-
-"use strict";
-
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
@@ -169,7 +115,11 @@ async function downloadProfile(ctx, local, fromDownload, dstPath, filename, sour
   
       // If --raw, pull the hermes profile to dstPath
       if (raw) {
-        execSyncWithLog(`adb shell run-as ${packageNameWithSuffix} cat cache/${file} > ${dstPath}/${file}`);
+        if (fromDownload) {
+            execSyncWithLog(`adb shell cat /sdcard/Download/${file} > ${dstPath}/${file}`);
+        } else {
+            execSyncWithLog(`adb shell run-as ${packageNameWithSuffix} cat cache/${file} > ${dstPath}/${file}`);
+        }
         _cliTools().logger.success(`Successfully pulled the file to ${dstPath}/${file}`);
       }
   
@@ -222,13 +172,12 @@ program
   .option('--appId <string>')
   .option('--appIdSuffix <string>')
   .option('--fromDownload')
+  .option('--raw')
   .option('--local <string>');
  
 program.parse();
 
-console.log(__dirname)
-
 const options = program.opts();
 const dstPath = "./"
-const ctx = require('@react-native-community/cli-config').default;
+const ctx = (require('@react-native-community/cli-config').default)();
 downloadProfile(ctx, options.local, options.fromDownload, dstPath, options.filename, options.sourcemapPath, options.raw, options.generateSourcemap, options.port, options.appId, options.appIdSuffix);
