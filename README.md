@@ -10,30 +10,43 @@ or
 yarn add react-native-release-profiler
 ```
 
-## Usage
+## Usage (Android)
 
 1. Install the library `yarn add react-native-release-profiler`
-2. Add debuggable flag to Android (REMEMBER TO REMOVE IT BEFORE RELEASING THE APP)
-   ```
-       <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-        ...
-        <application android:icon="@drawable/icon"
-            android:debuggable="true"
-   ```
-3. Build the app in release mode
-4. start profling 
+2. Build the app in release mode
+3. start profling 
    ```
    import { startProfiling } from 'react-native-release-profiler';
 
    startProfiling()
    ```
-5. stop profiling
+4. stop profiling
    ```
    import { stopProfiling } from 'react-native-release-profiler';
 
-   stopProfiling()
+   stopProfiling(true)
    ```
-6. Fetch and process the profile `npx react-native profile-hermes [destinationDir] --appId [your appId]`
+5. Fetch and process the profile `npx react-native-release-profiler --fromDownload --appId [your appId]`
+6. Open the profile in chrome://tracing
+
+## Usage (iOS)
+
+1. Install the library `yarn add react-native-release-profiler`
+2. Build the app in release mode
+3. start profling 
+   ```
+   import { startProfiling } from 'react-native-release-profiler';
+
+   startProfiling()
+   ```
+4. stop profiling
+   ```
+   import { stopProfiling } from 'react-native-release-profiler';
+
+   stopProfiling(true)
+   ```
+5. Send file from phone to your mac (It's in Downloads directory)
+6. process the profile `npx react-native-release-profiler --local <path to profile> --appId [your appId]`
 7. Open the profile in chrome://tracing
 
 
