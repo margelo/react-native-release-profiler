@@ -64,11 +64,11 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
               input.copyTo(output!!, DEFAULT_BUFFER_SIZE)
             }
           }
+          promise.resolve(uri.path)
+          return
         } catch (e: Exception) {
 
         }
-        promise.resolve(uri.path)
-        return
       }
     }
 
