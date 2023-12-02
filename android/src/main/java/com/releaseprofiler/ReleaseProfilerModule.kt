@@ -67,6 +67,8 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
 
         }
+        promise.resolve(uri.path)
+        return
       }
     }
 

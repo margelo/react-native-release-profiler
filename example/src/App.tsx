@@ -7,7 +7,7 @@ import Share from 'react-native-share';
 startProfiling()
 
 setTimeout(async () => {
-  const path = await stopProfiling()
+  const path = await stopProfiling(true)
   const actualPath = `file:/${path}`;
   Share.open({
     url: actualPath
