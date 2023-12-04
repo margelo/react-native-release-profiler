@@ -1,6 +1,6 @@
 # react-native-release-profiler
 
-Use Hermes profiler even in release builds
+Finally a reliable way to profile our apps. No more false-positives or findings issues that are only present in debug build.
 
 ## Installation
 
