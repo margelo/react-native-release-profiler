@@ -39,16 +39,36 @@ yarn add react-native-release-profiler
 
    startProfiling()
    ```
-4. stop profiling
+4. stop profiling and keep the path
    ```
    import { stopProfiling } from 'react-native-release-profiler';
 
-   stopProfiling(true)
+   const path = stopProfiling(true)
    ```
-5. Send file from phone to your mac (It's in Downloads directory)
-6. process the profile `npx react-native-release-profiler --local <path to profile> --appId [your appId]`
+5. Send file from phone to your mac through AirDrop
+    ```
+    import Share from 'react-native-share';
+    const path = await stopProfiling(true)
+    const actualPath = `file://${path}`;
+    Share.open({
+        url: actualPath
+    })
+    .then((res) => {
+        console.log(res);
+    })
+    .catch((err) => {
+        err && console.log(err);
+    });
+    ```
+6. process the profile `npx react-native-release-profiler --local <path to profile>`
 7. Open the profile in chrome://tracing
 
+## API
+ 
+ - `startProfiling()` - synchronously starts hermes profiler
+ 
+ - `stopProfiling(saveInDownloadsDirectory: boolean): Promise<string>` - stops profiling and saves file in cache or downloads directory.
+    - returns the path under which the profile has been saved
 
 ## Contributing
 

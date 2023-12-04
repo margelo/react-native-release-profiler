@@ -16,11 +16,13 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(startProfiling) {
     return [NSNumber numberWithInt:1];
 }
 
-RCT_EXPORT_METHOD(stopProfiling:(RCTPromiseResolveBlock)resolve
+RCT_EXPORT_METHOD(stopProfiling:(BOOL)saveInDownload
+                 withResolver:(RCTPromiseResolveBlock)resolve
                  withRejecter:(RCTPromiseRejectBlock)reject) {
     NSFileManager* sharedFM = [NSFileManager defaultManager];
     NSURL *appDir=[[sharedFM URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] objectAtIndex:0];
-    NSURL *fileURL=[appDir URLByAppendingPathComponent:@"profile.cpuprofile"];
+    NSString * tempFilename = [NSString stringWithFormat:@"profile-%@%@", [[NSProcessInfo processInfo] globallyUniqueString], @".cpuprofile"];
+    NSURL *fileURL=[appDir URLByAppendingPathComponent:tempFilename];
     std::string finalPath = std::string([fileURL.path UTF8String]);
     [sharedFM createFileAtPath:fileURL.path
                                             contents:[@"" dataUsingEncoding:NSUTF8StringEncoding]

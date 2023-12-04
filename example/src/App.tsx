@@ -8,7 +8,7 @@ startProfiling()
 
 setTimeout(async () => {
   const path = await stopProfiling(true)
-  const actualPath = `file:/${path}`;
+  const actualPath = `file://${path}`;
   Share.open({
     url: actualPath
   })

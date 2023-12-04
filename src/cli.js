@@ -97,16 +97,16 @@ function execSyncWithLog(command) {
 }
 
 async function downloadProfile(ctx, local, fromDownload, dstPath, filename, sourcemapPath, raw, shouldGenerateSourcemap, port, appId, appIdSuffix) {
-    
     try {
       const androidProject = (0, _cliPlatformAndroid().getAndroidProject)(ctx);
       const packageNameWithSuffix = [appId || androidProject.packageName, appIdSuffix].filter(Boolean).join('.');
-  
+
       // If file name is not specified, pull the latest file from device
-      const file = filename || ((fromDownload) ? getLatestFileFromDownloads(packageNameWithSuffix) : getLatestFile(packageNameWithSuffix));
+      let file = filename || ((fromDownload) ? getLatestFileFromDownloads(packageNameWithSuffix) : getLatestFile(packageNameWithSuffix));
       if (!file) {
         throw new (_cliTools().CLIError)('There is no file in the cache/ directory. Did you record a profile from the developer menu?');
       }
+
       _cliTools().logger.info(`File to be pulled: ${file}`);
   
       // If destination path is not specified, pull to the current directory
@@ -162,6 +162,15 @@ async function downloadProfile(ctx, local, fromDownload, dstPath, filename, sour
     }
 }
 
+function getFilename(path) {
+    if (path == null) {
+        return null;
+    }
+    const nodes = path.split('/')
+    const res = nodes[nodes.length - 1]
+    return res
+}
+
 const { program } = require('commander');
 
 program
@@ -180,4 +189,4 @@ program.parse();
 const options = program.opts();
 const dstPath = "./"
 const ctx = (require('@react-native-community/cli-config').default)();
-downloadProfile(ctx, options.local, options.fromDownload, dstPath, options.filename, options.sourcemapPath, options.raw, options.generateSourcemap, options.port, options.appId, options.appIdSuffix);
+downloadProfile(ctx, options.local, options.fromDownload, dstPath, options.filename || getFilename(options.local), options.sourcemapPath, options.raw, options.generateSourcemap, options.port, options.appId, options.appIdSuffix);
