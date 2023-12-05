@@ -2,6 +2,10 @@
 
 Finally a reliable way to profile our apps. No more false-positives or findings issues that are only present in debug build.
 
+## Need some help with performance issues?
+
+If have any problems with performance feel free to reach out to us at `hello@margelo.io`. We will make your app faster than any of its competitors.  
+
 ## Installation
 
 ```sh
