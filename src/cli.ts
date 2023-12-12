@@ -1,14 +1,17 @@
 import context from '@react-native-community/cli-config';
-import {logger, CLIError} from '@react-native-community/cli-tools';
+import { logger, CLIError } from '@react-native-community/cli-tools';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import {execSync} from 'child_process';
-import type {Config} from '@react-native-community/cli-types';
+import { execSync } from 'child_process';
+import type { Config } from '@react-native-community/cli-types';
 import transformer from 'hermes-profile-transformer';
-import {findSourcemap, generateSourcemap} from '@react-native-community/cli-hermes/build/profileHermes/sourcemapUtils';
-import {getAndroidProject} from '@react-native-community/cli-platform-android';
-import {getMetroBundleOptions} from '@react-native-community/cli-hermes/build/profileHermes/metroBundleOptions';
+import {
+  findSourcemap,
+  generateSourcemap,
+} from '@react-native-community/cli-hermes/build/profileHermes/sourcemapUtils';
+import { getAndroidProject } from '@react-native-community/cli-platform-android';
+import { getMetroBundleOptions } from '@react-native-community/cli-hermes/build/profileHermes/metroBundleOptions';
 
 // Most of the file is just a copy of https://github.com/react-native-community/cli/blob/main/packages/cli-hermes/src/profileHermes/downloadProfile.ts
 
@@ -44,7 +47,9 @@ function jsonStringify(obj: any) {
 
 function getLatestFileFromDownloads() {
   try {
-    const file = execSync(`adb shell ls "/sdcard/Download" -tp | grep -v /$ | grep -E '.cpuprofile' | head -1`);
+    const file = execSync(
+      `adb shell ls "/sdcard/Download" -tp | grep -v /$ | grep -E '.cpuprofile' | head -1`
+    );
     return file.toString().trim();
   } catch (e) {
     throw e;
@@ -64,7 +69,7 @@ function getLatestFileFromDownloads() {
  */
 export async function downloadProfile(
   ctx: Config,
-  local: string | undefined, 
+  local: string | undefined,
   fromDownload: Boolean | undefined,
   dstPath: string,
   filename?: string,
@@ -73,7 +78,7 @@ export async function downloadProfile(
   shouldGenerateSourcemap?: boolean,
   port: string = '8081',
   appId?: string,
-  appIdSuffix?: string,
+  appIdSuffix?: string
 ) {
   try {
     const androidProject = getAndroidProject(ctx);
@@ -85,10 +90,14 @@ export async function downloadProfile(
       .join('.');
 
     // If file name is not specified, pull the latest file from device
-    let file = filename || ((fromDownload) ? getLatestFileFromDownloads() : getLatestFile(packageNameWithSuffix));
+    let file =
+      filename ||
+      (fromDownload
+        ? getLatestFileFromDownloads()
+        : getLatestFile(packageNameWithSuffix));
     if (!file) {
       throw new CLIError(
-        'There is no file in the cache/ directory. Did you record a profile from the developer menu?',
+        'There is no file in the cache/ directory. Did you record a profile from the developer menu?'
       );
     }
 
@@ -102,11 +111,15 @@ export async function downloadProfile(
     // If --raw, pull the hermes profile to dstPath
     if (raw) {
       if (fromDownload) {
-        execSyncWithLog(`adb shell cat /sdcard/Download/${file} > ${dstPath}/${file}`);
+        execSyncWithLog(
+          `adb shell cat /sdcard/Download/${file} > ${dstPath}/${file}`
+        );
       } else {
-        execSyncWithLog(`adb shell run-as ${packageNameWithSuffix} cat cache/${file} > ${dstPath}/${file}`);
+        execSyncWithLog(
+          `adb shell run-as ${packageNameWithSuffix} cat cache/${file} > ${dstPath}/${file}`
+        );
       }
-     
+
       logger.success(`Successfully pulled the file to ${dstPath}/${file}`);
     }
 
@@ -116,11 +129,15 @@ export async function downloadProfile(
       const tempFilePath = path.join(osTmpDir, file);
 
       if (local) {
-        fs.copyFileSync(local, tempFilePath)
+        fs.copyFileSync(local, tempFilePath);
       } else if (fromDownload) {
-          execSyncWithLog(`adb shell cat /sdcard/Download/${file} > ${tempFilePath}`);
+        execSyncWithLog(
+          `adb shell cat /sdcard/Download/${file} > ${tempFilePath}`
+        );
       } else {
-          execSyncWithLog(`adb shell run-as ${packageNameWithSuffix} cat cache/${file} > ${tempFilePath}`);
+        execSyncWithLog(
+          `adb shell run-as ${packageNameWithSuffix} cat cache/${file} > ${tempFilePath}`
+        );
       }
 
       const bundleOptions = getMetroBundleOptions(tempFilePath);
@@ -137,10 +154,10 @@ export async function downloadProfile(
         // Run without source map
         if (!sourcemapPath) {
           logger.warn(
-            'Cannot find source maps, running the transformer without it',
+            'Cannot find source maps, running the transformer without it'
           );
           logger.info(
-            'Instructions on how to get source maps: set `bundleInDebug: true` in your app/build.gradle file, inside the `project.ext.react` map.',
+            'Instructions on how to get source maps: set `bundleInDebug: true` in your app/build.gradle file, inside the `project.ext.react` map.'
           );
         }
       }
@@ -149,12 +166,12 @@ export async function downloadProfile(
       const events = await transformer(
         tempFilePath,
         sourcemapPath,
-        'index.bundle',
+        'index.bundle'
       );
 
       const transformedFilePath = `${dstPath}/${path.basename(
         file,
-        '.cpuprofile',
+        '.cpuprofile'
       )}-converted.json`;
 
       // Convert to JSON in chunks because JSON.stringify() will fail for large
@@ -163,7 +180,7 @@ export async function downloadProfile(
 
       fs.writeFileSync(transformedFilePath, '[' + out + ']', 'utf-8');
       logger.success(
-        `Successfully converted to Chrome tracing format and pulled the file to ${transformedFilePath}`,
+        `Successfully converted to Chrome tracing format and pulled the file to ${transformedFilePath}`
       );
     }
   } catch (e) {
@@ -172,12 +189,12 @@ export async function downloadProfile(
 }
 
 function getFilename(path?: string) {
-    if (path == null) {
-        return null;
-    }
-    const nodes = path.split('/')
-    const res = nodes[nodes.length - 1]
-    return res
+  if (path == null) {
+    return null;
+  }
+  const nodes = path.split('/');
+  const res = nodes[nodes.length - 1];
+  return res;
 }
 
 const { program } = require('commander');
@@ -192,9 +209,21 @@ program
   .option('--fromDownload')
   .option('--raw')
   .option('--local <string>');
- 
+
 program.parse();
 
 const options = program.opts();
-const dstPath = "./"
-downloadProfile(context as any as Config, options.local, options.fromDownload, dstPath, options.filename || getFilename(options.local), options.sourcemapPath, options.raw, options.generateSourcemap, options.port, options.appId, options.appIdSuffix);
+const dstPath = './';
+downloadProfile(
+  context as any as Config,
+  options.local,
+  options.fromDownload,
+  dstPath,
+  options.filename || getFilename(options.local),
+  options.sourcemapPath,
+  options.raw,
+  options.generateSourcemap,
+  options.port,
+  options.appId,
+  options.appIdSuffix
+);
