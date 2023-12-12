@@ -1,10 +1,12 @@
 # react-native-release-profiler
 
 Finally a reliable way to profile our apps. No more false-positives or findings issues that are only present in debug build.
+In Debug builds (even when you use release bundle) a lot of things can take much more time than it actually takes on production. 
+For instance garbage collection or JSI calls. Because of that every thing we find slow using hermes profiler has to be verified using release build. With this library you can run hermes profiler using release builds which simplifies the whole process. Additionally you can use the library on production to let the most challening users send you performance profiles.
 
 ## Need some help with performance issues?
 
-If have any problems with performance feel free to reach out to us at `hello@margelo.io`. We will make your app faster than any of its competitors.  
+If have any problems with performance feel free to reach out to us at `hello@margelo.io`. We will do our best to fix them and show you how you can avoid similar issus in the future. 
 
 ## Installation
 
