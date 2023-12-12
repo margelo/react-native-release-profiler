@@ -21,13 +21,13 @@ yarn add react-native-release-profiler
 1. Install the library `yarn add react-native-release-profiler`
 2. Build the app in release mode
 3. start profling 
-   ```
+   ```ts
    import { startProfiling } from 'react-native-release-profiler';
 
    startProfiling()
    ```
 4. stop profiling
-   ```
+   ```ts
    import { stopProfiling } from 'react-native-release-profiler';
 
    stopProfiling(true)
@@ -40,19 +40,19 @@ yarn add react-native-release-profiler
 1. Install the library `yarn add react-native-release-profiler`
 2. Build the app in release mode
 3. start profling 
-   ```
+   ```ts
    import { startProfiling } from 'react-native-release-profiler';
 
    startProfiling()
    ```
 4. stop profiling and keep the path
-   ```
+   ```ts
    import { stopProfiling } from 'react-native-release-profiler';
 
    const path = stopProfiling(true)
    ```
 5. Send file from phone to your mac through AirDrop
-    ```
+    ```ts
     import Share from 'react-native-share';
     const path = await stopProfiling(true)
     const actualPath = `file://${path}`;
