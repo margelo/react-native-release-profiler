@@ -7,9 +7,7 @@
   "types": "lib/typescript/src/index.d.ts",
   "react-native": "src/index",
   "source": "src/index",
-  "bin": {
-    "react-native-release-profiler": "src/cli"
-  },
+  "bin": "src/cli",
   "files": [
     "src",
     "lib",
@@ -163,6 +161,7 @@
     ]
   },
   "dependencies": {
+    "@react-native-community/cli": "^12.2.1",
     "commander": "^11.1.0"
   }
 }
