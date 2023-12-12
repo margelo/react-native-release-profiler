@@ -1,4 +1,4 @@
-import context from '@react-native-community/cli-config';
+import getContext from '@react-native-community/cli-config';
 import { logger, CLIError } from '@react-native-community/cli-tools';
 import fs from 'fs';
 import path from 'path';
@@ -215,7 +215,7 @@ program.parse();
 const options = program.opts();
 const dstPath = './';
 downloadProfile(
-  context as any as Config,
+  getContext(),
   options.local,
   options.fromDownload,
   dstPath,
