@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import getContext from '@react-native-community/cli-config';
 import { logger, CLIError } from '@react-native-community/cli-tools';
 import fs from 'fs';
