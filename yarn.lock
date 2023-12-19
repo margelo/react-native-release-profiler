@@ -11044,7 +11044,7 @@ __metadata:
     react: "*"
     react-native: "*"
   bin:
-    react-native-release-profiler: lib/commonjs/cli
+    react-native-release-profiler: lib/commonjs/cli.js
   languageName: unknown
   linkType: soft
 
