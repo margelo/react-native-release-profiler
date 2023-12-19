@@ -6,7 +6,7 @@ For instance garbage collection or JSI calls. Because of that every thing we fin
 
 ## Need some help with performance issues?
 
-If have any problems with performance feel free to reach out to us at `hello@margelo.io`. We will do our best to fix them and show you how you can avoid similar issus in the future. 
+If have any problems with performance feel free to reach out to us at `hello@margelo.io`. 
 
 ## Installation
 

@@ -40,13 +40,13 @@
     "ios",
     "android"
   ],
-  "repository": "https://github.com/Szymon20000/react-native-release-profiler",
+  "repository": "https://github.com/margelo/react-native-release-profiler",
   "author": "Szymon Kapała <szymon20000@gmail.com> (https://github.com/Szymon20000)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/Szymon20000/react-native-release-profiler/issues"
+    "url": "https://github.com/margelo/react-native-release-profiler/issues"
   },
-  "homepage": "https://github.com/Szymon20000/react-native-release-profiler#readme",
+  "homepage": "https://github.com/margelo/react-native-release-profiler#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },
