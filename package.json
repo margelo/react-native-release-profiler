@@ -7,7 +7,9 @@
   "types": "lib/typescript/src/index.d.ts",
   "react-native": "src/index",
   "source": "src/index",
-  "bin": "lib/commonjs/cli",
+  "bin": {
+    "react-native-release-profiler": "lib/commonjs/cli"
+  },
   "files": [
     "src",
     "lib",
