@@ -1,6 +1,6 @@
 {
   "name": "react-native-release-profiler",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Use Hermes profiler even in release builds",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
