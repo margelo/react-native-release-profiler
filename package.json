@@ -1,7 +1,7 @@
 {
   "name": "react-native-release-profiler",
   "version": "0.1.4",
-  "description": "Use Hermes profiler even in release builds",
+  "description": "A fast and simple library to passively profile JS/Hermes performance in production and release builds.",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
   "types": "lib/typescript/src/index.d.ts",
@@ -42,7 +42,14 @@
     "android"
   ],
   "repository": "https://github.com/margelo/react-native-release-profiler",
-  "author": "Szymon Kapała <szymon20000@gmail.com> (https://github.com/Szymon20000)",
+  "author": "Szymon Kapała <szymon@margelo.io> (https://github.com/Szymon20000)",
+  "contributors": [
+    {
+      "name": "Marc Rousavy",
+      "email": "marc@margelo.io",
+      "url": "https://github.com/mrousavy"
+    }
+  ],
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/margelo/react-native-release-profiler/issues"
