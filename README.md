@@ -1,80 +1,73 @@
+<a href="https://margelo.io">
+  <img src="./img/banner.svg" width="100%" />
+</a>
+
 # react-native-release-profiler
 
-Finally a reliable way to profile our apps. No more false-positives or findings issues that are only present in debug build.
-In Debug builds (even when you use release bundle) a lot of things can take much more time than it actually takes on production. 
-For instance garbage collection or JSI calls. Because of that every thing we find slow using hermes profiler has to be verified using release build. With this library you can run hermes profiler using release builds which simplifies the whole process. Additionally you can use the library on production to let the most challening users send you performance profiles.
+A fast and simple library to passively profile JS/Hermes performance in production and release builds.
 
-## Need some help with performance issues?
+## Why
 
-If have any problems with performance feel free to reach out to us at `hello@margelo.io`. 
+Usually performance issues are profiled in debug builds, which could lead to false positives (e.g. JS Garbage Collectors, Hermes-specific debug markers, or other LLDB hangs).
+
+**react-native-release-profiler** allows you to profile your app in release builds, both in a local environment to profile specific issues, as well as in a production environment to spot regressions or collect performance samples from a wider variety of user devices.
+
+## Need help?
+
+If you're having performance problems in your app, feel free to reach out to us at hello@margelo.io. We do this a lot.
 
 ## Installation
 
 ```sh
-npm install react-native-release-profiler 
-or
 yarn add react-native-release-profiler
+cd ios && pod install
 ```
 
-## Usage (Android)
+## Usage
 
-1. Install the library `yarn add react-native-release-profiler`
-2. Build the app in release mode
-3. start profling 
-   ```ts
-   import { startProfiling } from 'react-native-release-profiler';
-
-   startProfiling()
-   ```
-4. stop profiling
-   ```ts
-   import { stopProfiling } from 'react-native-release-profiler';
-
-   stopProfiling(true)
-   ```
-5. Fetch and process the profile `npx react-native-release-profiler --fromDownload --appId [your appId]`
-6. Open the profile in chrome://tracing
-
-## Usage (iOS)
-
-1. Install the library `yarn add react-native-release-profiler`
-2. Build the app in release mode
-3. start profling 
-   ```ts
-   import { startProfiling } from 'react-native-release-profiler';
-
-   startProfiling()
-   ```
-4. stop profiling and keep the path
-   ```ts
-   import { stopProfiling } from 'react-native-release-profiler';
-
-   const path = stopProfiling(true)
-   ```
-5. Send file from phone to your mac through AirDrop
+1. Install **react-native-release-profiler**
+2. Build your app in release mode
+3. Start a profiling session:
     ```ts
-    import Share from 'react-native-share';
-    const path = await stopProfiling(true)
-    const actualPath = `file://${path}`;
-    Share.open({
-        url: actualPath
-    })
-    .then((res) => {
-        console.log(res);
-    })
-    .catch((err) => {
-        err && console.log(err);
-    });
+    import { startProfiling } from 'react-native-release-profiler'
+
+    startProfiling()
     ```
-6. process the profile `npx react-native-release-profiler --local <path to profile>`
-7. Open the profile in chrome://tracing
+4. Stop the profiling session:
+    ```ts
+    import { stopProfiling } from 'react-native-release-profiler'
+
+    // `true` to save the trace to the phone's downloads folder, `false` otherwise
+    const path = await stopProfiling(true)
+    ```
+5. Download and process the performance trace from your phone to your PC:
+    - On **Android**:
+        ```
+        npx react-native-release-profiler --fromDownload --appId <your appId>
+        ```
+    - On **iOS**:
+        ```
+        npx react-native-release-profiler --local <path to profile>
+        ```
+6. Open the performance trace in your tool of choice:
+    - SpeedScope (https://www.speedscope.app)
+    - Perfetto UI (https://ui.perfetto.dev/)
+    - Google Chrome's Tracing UI ([chrome://tracing](chrome://tracing))
+
+<img src="img/perfetto.png" />
+
 
 ## API
- 
- - `startProfiling()` - synchronously starts hermes profiler
- 
- - `stopProfiling(saveInDownloadsDirectory: boolean): Promise<string>` - stops profiling and saves file in cache or downloads directory.
-    - returns the path under which the profile has been saved
+
+### `startProfiling(): void`
+
+Synchronously starts the Hermes Profiling Session.
+
+### `stopProfiling(saveInDownloadsDirectory: boolean): Promise<string>`
+
+Asynchronously stops the Hermes Profiling Session, and saves the file in a cache or downloads directory if `saveInDownloadsDirectory` is `true`.
+
+Returns the path of the saved profile.
 
 ## Contributing
 
@@ -83,7 +76,3 @@ See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the 
 ## License
 
 MIT
-
----
-
-Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)
