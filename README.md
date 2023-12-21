@@ -14,7 +14,7 @@ Usually performance issues are profiled in debug builds, which could lead to fal
 
 ## Need help?
 
-If you're having performance problems in your app, feel free to reach out to us at hello@margelo.io. We do this a lot.
+If you're having performance problems in your app, feel free to reach out to us at hello@margelo.io. We do this a lot. 😉
 
 ## Installation
 
