@@ -57,6 +57,26 @@ function getLatestFileFromDownloads() {
   }
 }
 
+function maybeAddLineAndColumn(path: string): void {
+  const profile = fs.readFileSync(path, 'utf8');
+  const profileJson = JSON.parse(profile);
+  const stackFrames = profileJson.stackFrames;
+  if (stackFrames !== undefined) {
+    for (const key of Object.keys(stackFrames)) {
+      const stackFrame = stackFrames[key];
+      if (stackFrame.funcVirtAddr && stackFrame.offset) {
+        stackFrame.line = `${1}`;
+        stackFrame.column = `${
+          parseInt(stackFrame.funcVirtAddr) + parseInt(stackFrame.offset) + 1
+        }`;
+        delete stackFrame.funcVirtAddr;
+        delete stackFrame.offset;
+      }
+    }
+    fs.writeFileSync(path, JSON.stringify(profileJson));
+  }
+}
+
 /**
  * Pull and convert a Hermes tracing profile to Chrome tracing profile
  * @param ctx
@@ -121,6 +141,7 @@ export async function downloadProfile(
         );
       }
 
+      maybeAddLineAndColumn(`${dstPath}/${file}`);
       logger.success(`Successfully pulled the file to ${dstPath}/${file}`);
     }
 
@@ -140,7 +161,7 @@ export async function downloadProfile(
           `adb shell run-as ${packageNameWithSuffix} cat cache/${file} > ${tempFilePath}`
         );
       }
-
+      maybeAddLineAndColumn(tempFilePath);
       const bundleOptions = getMetroBundleOptions(tempFilePath);
 
       // If path to source map is not given
