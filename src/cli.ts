@@ -106,6 +106,12 @@ export async function downloadProfile(
       .filter(Boolean)
       .join('.');
 
+    if (!packageNameWithSuffix) {
+      throw new Error(
+        "Failed to retrieve the package name from the project's Android manifest file. Please provide the package name with the --appId flag."
+      );
+    }
+
     // If file name is not specified, pull the latest file from device
     let file =
       filename ||
@@ -121,7 +127,6 @@ export async function downloadProfile(
     logger.info(`File to be pulled: ${file}`);
 
     // If destination path is not specified, pull to the current directory
-    // @ts-ignore
     dstPath = dstPath || ctx.root;
 
     logger.debug('Internal commands run to pull the file:');
