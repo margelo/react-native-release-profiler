@@ -69,6 +69,11 @@ module.exports = {
     publicPath: '/',
     filename: 'rnw.bundle.js',
   },
+  devServer: {
+    headers: {
+      'Document-Policy': 'js-profiling',
+    },
+  },
   resolve: {
     extensions: ['.web.tsx', '.web.ts', '.tsx', '.ts', '.web.js', '.js'],
     alias: {
