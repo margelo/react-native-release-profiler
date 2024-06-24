@@ -98,7 +98,7 @@ export async function downloadProfile(
   let ctx = await getConfig();
 
   try {
-    const androidProject = ctx.project.android;
+    const androidProject = ctx?.project.android;
     const packageNameWithSuffix = [
       appId || androidProject?.packageName,
       appIdSuffix,

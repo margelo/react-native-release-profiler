@@ -1,6 +1,14 @@
 import { exec } from 'child_process';
 
-function getConfig(): Promise<any> {
+interface Config {
+  project: {
+    android: {
+      packageName: string;
+    }
+  }
+}
+
+function getConfig(): Promise<Config | null> {
   return new Promise((resolve, reject) => {
     exec('npx react-native config', (error, stdout, stderr) => {
       if (error) {
@@ -12,6 +20,7 @@ function getConfig(): Promise<any> {
       resolve(JSON.parse(stdout));
 
       if (stderr) {
+        resolve(null);
         throw new Error(stderr);
       }
     });
