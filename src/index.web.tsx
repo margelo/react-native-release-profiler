@@ -1,17 +1,50 @@
-let profiler = {
+type Profiler = any;
+declare global {
+  const Profiler: Profiler;
+  interface Window {
+    Profiler: Profiler;
+  }
+}
+
+const NOT_STARTED_PROFILER = {
   stop: (): Promise<ProfilingTrace> => {
-    throw new Error('The profiler has not been started');
+    console.warn('The profiler has not been started');
+
+    return Promise.resolve({
+      frames: [],
+      resources: [],
+      samples: [],
+      stacks: [],
+    });
   },
 };
+let profiler = NOT_STARTED_PROFILER;
+
+const SAMPLING_INTERVAL = 10;
+const MAX_BUFFER_SIZE = 10000;
+const MICRO_SECONDS_IN_MILLISECONDS = 1000;
 
 export function startProfiling(): boolean {
-  // @ts-expect-error Profiler type is not available in RN context
-  profiler = new Profiler({ sampleInterval: 10, maxBufferSize: 10000 });
+  if (typeof window.Profiler !== 'function') {
+    console.warn(
+      'Profiler is not available in this browser. Ignoring this profiler run...'
+    );
+
+    return false;
+  }
+
+  profiler = new Profiler({
+    sampleInterval: SAMPLING_INTERVAL,
+    maxBufferSize: MAX_BUFFER_SIZE,
+  });
+
   return true;
 }
 
 export async function stopProfiling(saveToDownloads = false): Promise<string> {
   const trace = await profiler.stop();
+
+  profiler = NOT_STARTED_PROFILER;
 
   if (saveToDownloads) {
     downloadJsonFile(
@@ -89,7 +122,11 @@ function convertToTraceEventFormat(profilingTrace: ProfilingTrace) {
   });
 
   // Convert samples and stacks to trace events
-  samples.forEach((sample) => {
+  samples.forEach((sample, index) => {
+    const nextSample = samples[index + 1];
+    const duration = nextSample
+      ? nextSample.timestamp - sample.timestamp
+      : SAMPLING_INTERVAL;
     const stack = sample.stackId ? stacks[sample.stackId] : undefined;
     let currentStack = stack;
     while (currentStack) {
@@ -97,11 +134,11 @@ function convertToTraceEventFormat(profilingTrace: ProfilingTrace) {
       traceEvents.push({
         pid: 1, // Process ID
         tid: 1, // Thread ID
-        ts: sample.timestamp * 1000, // Convert to microseconds
+        ts: sample.timestamp * MICRO_SECONDS_IN_MILLISECONDS,
         ph: 'X', // Complete event
         name: frame?.name ?? 'anonymous',
         cat: 'function',
-        dur: 0, // Duration, we'll adjust this later
+        dur: duration * MICRO_SECONDS_IN_MILLISECONDS,
         args: {
           column: frame?.column,
           line: frame?.line,
@@ -113,13 +150,6 @@ function convertToTraceEventFormat(profilingTrace: ProfilingTrace) {
         : undefined;
     }
   });
-
-  // Calculate duration for each event
-  traceEvents.sort((a, b) => a.ts - b.ts);
-  for (let i = 0; i < traceEvents.length - 1; i++) {
-    // @ts-expect-error object can not be undefined because we iterate through defined array
-    traceEvents[i].dur = traceEvents[i + 1].ts - traceEvents[i].ts;
-  }
 
   return {
     traceEvents,
