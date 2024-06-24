@@ -2,15 +2,15 @@ import * as React from 'react';
 
 import { StyleSheet, View, Text } from 'react-native';
 import { startProfiling, stopProfiling } from 'react-native-release-profiler';
-// import Share from 'react-native-share';
+import Share from './Share';
 
 startProfiling();
 
 setTimeout(async () => {
   const path = await stopProfiling(true);
   const actualPath = `file://${path}`;
-  console.log(path, actualPath);
-  /*Share.open({
+
+  Share.open({
     url: actualPath,
   })
     .then((res) => {
@@ -18,7 +18,7 @@ setTimeout(async () => {
     })
     .catch((err) => {
       err && console.log(err);
-    });*/
+    });
 }, 10000);
 
 function FFFF() {
