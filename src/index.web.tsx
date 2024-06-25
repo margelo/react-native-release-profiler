@@ -1,3 +1,20 @@
+type ProfilerOptions = {
+  sampleInterval: number;
+  maxBufferSize: number;
+};
+
+type Profiler = {
+  new (options: ProfilerOptions): Profiler;
+  stop(): Promise<ProfilingTrace>;
+};
+
+declare global {
+  const Profiler: Profiler;
+  interface Window {
+    Profiler: Profiler;
+  }
+}
+
 type Sample = {
   stackId?: number;
   timestamp: number;
