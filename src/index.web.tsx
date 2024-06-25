@@ -1,6 +1,5 @@
 type Profiler = any;
 declare global {
-  const Profiler: Profiler;
   interface Window {
     Profiler: Profiler;
   }
@@ -48,7 +47,7 @@ export async function stopProfiling(saveToDownloads = false): Promise<string> {
 
   if (saveToDownloads) {
     downloadJsonFile(
-      convertToTraceEventFormat(trace),
+      convertToHermesProfilerFormat(trace),
       `trace-${new Date().toISOString()}`
     );
   }
@@ -76,22 +75,6 @@ type ProfilingTrace = {
   samples: Sample[];
   stacks: Stack[];
 };
-type TraceEvent = {
-  pid: number;
-  tid: number;
-  ts: number;
-  ph: string;
-  name: string;
-  cat: string;
-  dur: number;
-  args:
-    | {
-        column: number;
-        line: number;
-        resource: string;
-      }
-    | {};
-};
 
 function downloadJsonFile(
   exportObj: Record<string, unknown>,
@@ -109,49 +92,31 @@ function downloadJsonFile(
   downloadAnchorNode.remove();
 }
 
-function convertToTraceEventFormat(profilingTrace: ProfilingTrace) {
+function convertToHermesProfilerFormat(profilingTrace: ProfilingTrace) {
   const { frames, resources, samples, stacks } = profilingTrace;
-  const traceEvents: TraceEvent[] = [];
-
-  // Map frames to their corresponding resources
-  const frameResourceMap = frames.map((frame) => {
-    return {
-      ...frame,
-      resource: frame.resourceId ? resources[frame.resourceId] : undefined,
-    };
-  });
-
-  // Convert samples and stacks to trace events
-  samples.forEach((sample, index) => {
-    const nextSample = samples[index + 1];
-    const duration = nextSample
-      ? nextSample.timestamp - sample.timestamp
-      : SAMPLING_INTERVAL;
-    const stack = sample.stackId ? stacks[sample.stackId] : undefined;
-    let currentStack = stack;
-    while (currentStack) {
-      const frame = frameResourceMap[currentStack.frameId];
-      traceEvents.push({
-        pid: 1, // Process ID
-        tid: 1, // Thread ID
-        ts: sample.timestamp * MICRO_SECONDS_IN_MILLISECONDS,
-        ph: 'X', // Complete event
-        name: frame?.name ?? 'anonymous',
-        cat: 'function',
-        dur: duration * MICRO_SECONDS_IN_MILLISECONDS,
-        args: {
-          column: frame?.column,
-          line: frame?.line,
-          resource: frame?.resource,
-        },
-      });
-      currentStack = currentStack.parentId
-        ? stacks[currentStack.parentId]
-        : undefined;
-    }
-  });
 
   return {
-    traceEvents,
+    traceEvents: [],
+    samples: samples.map((sample) => ({
+      cpu: '-1',
+      name: '',
+      ts: sample.timestamp * MICRO_SECONDS_IN_MILLISECONDS,
+      pid: 1,
+      tid: '1',
+      weight: '1',
+      sf: sample.stackId ?? 1,
+    })),
+    stackFrames: stacks.map((stack) => {
+      const resourceId = frames[stack.frameId]?.resourceId;
+
+      return {
+        parent: stack.parentId,
+        category: 'JavaScript',
+        ...frames[stack.frameId],
+        name: `${frames[stack.frameId]?.name}(${
+          resourceId ? resources[resourceId] : null
+        })`,
+      };
+    }),
   };
 }
