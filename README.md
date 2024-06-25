@@ -80,6 +80,9 @@ Asynchronously stops the Hermes Profiling Session, and saves the file in a cache
 
 Returns the path of the saved profile.
 
+> [!WARNING]
+> Since browsers don't have a direct access to the file system, the path will be always an empty string. Please, use the `saveInDownloadsDirectory` parameter to save the profile in the downloads directory.
+
 ## Contributing
 
 See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the repository and the development workflow.
