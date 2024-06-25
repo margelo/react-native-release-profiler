@@ -16,6 +16,16 @@ Usually performance issues are profiled in debug builds, which could lead to fal
 
 The web support is based on sampling [JS Self-Profiling](https://wicg.github.io/js-self-profiling/) API, so not all browsers support it yet. To see in which browsers it is supported, check [this page](https://caniuse.com/mdn-api_profiler).
 
+To make it possible to work you'll need to add `'Document-Policy': 'js-profiling'` header to your server response. Using `webpack` in dev mode you can do that by adding these lines to your `webpack.config.js`:
+
+```js
+devServer: {
+    headers: {
+        'Document-Policy': 'js-profiling',
+    },
+}
+```
+
 > [!WARNING]
 > By default sampling interval is set to 10 milliseconds. This is the lowest supported interval, but on Windows machines this interval will be 16 milliseconds.
 
@@ -75,9 +85,6 @@ Synchronously starts the Hermes Profiling Session.
 Asynchronously stops the Hermes Profiling Session, and saves the file in a cache or downloads directory if `saveInDownloadsDirectory` is `true`.
 
 Returns the path of the saved profile.
-
-> [!WARNING]
-> Since browsers don't have a direct access to the file system, the path will be always an empty string. Please, use the `saveInDownloadsDirectory` parameter to save the profile in the downloads directory.
 
 ## Contributing
 
