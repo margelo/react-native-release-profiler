@@ -49,15 +49,15 @@ cd ios && pod install
     ```
 5. Download and process the performance trace from your phone to your PC:
     - On **Android**:
-        ```bash
+        ```
         npx react-native-release-profiler --fromDownload --appId <your appId>
         ```
     - On **iOS**:
-        ```bash
+        ```
         npx react-native-release-profiler --local <path to profile>
         ```
     - On **web**:
-        ```bash
+        ```
         npx react-native-release-profiler --file <path to profile>
         ```
 6. Open the performance trace in your tool of choice:
