@@ -66,7 +66,7 @@ export async function stopProfiling(saveToDownloads = false): Promise<string> {
 
   if (!saveToDownloads) {
     console.warn(
-      "Specifying `saveToDownloads=false` on web doesn't make sense, since trace will be lost in this case"
+      'Specifying `saveToDownloads=false` is not supported on web, as downloading is the only possible way to store the trace file'
     );
   }
 
