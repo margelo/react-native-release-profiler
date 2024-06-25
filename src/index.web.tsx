@@ -82,11 +82,11 @@ function downloadJsonFile(
 ) {
   const dataStr =
     'data:text/json;charset=utf-8,' +
-    encodeURIComponent(JSON.stringify(exportObj, null, 2));
+    encodeURIComponent(JSON.stringify(exportObj));
   const downloadAnchorNode = document.createElement('a');
 
   downloadAnchorNode.setAttribute('href', dataStr);
-  downloadAnchorNode.setAttribute('download', exportName + '.json');
+  downloadAnchorNode.setAttribute('download', exportName + '.cpuprofile.txt');
   document.body.appendChild(downloadAnchorNode); // required for Firefox
   downloadAnchorNode.click();
   downloadAnchorNode.remove();
