@@ -58,7 +58,7 @@ cd ios && pod install
         ```
     - On **web**:
         ```
-        npx react-native-release-profiler --file <path to profile>
+        npx react-native-release-profiler --local <path to profile>
         ```
 6. Open the performance trace in your tool of choice:
     - SpeedScope (https://www.speedscope.app)
