@@ -52,11 +52,7 @@ cd ios && pod install
         ```
         npx react-native-release-profiler --fromDownload --appId <your appId>
         ```
-    - On **iOS**:
-        ```
-        npx react-native-release-profiler --local <path to profile>
-        ```
-    - On **web**:
+    - On **iOS** and **web**:
         ```
         npx react-native-release-profiler --local <path to profile>
         ```

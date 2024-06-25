@@ -1,9 +1,23 @@
-type Profiler = any;
-declare global {
-  interface Window {
-    Profiler: Profiler;
-  }
-}
+type Sample = {
+  stackId?: number;
+  timestamp: number;
+};
+type Stack = {
+  frameId: number;
+  parentId?: number;
+};
+type Frame = {
+  name: string;
+  line?: number;
+  column?: number;
+  resourceId?: number;
+};
+type ProfilingTrace = {
+  frames: Frame[];
+  resources: string[];
+  samples: Sample[];
+  stacks: Stack[];
+};
 
 const NOT_STARTED_PROFILER = {
   stop: (): Promise<ProfilingTrace> => {
@@ -45,36 +59,19 @@ export async function stopProfiling(saveToDownloads = false): Promise<string> {
 
   profiler = NOT_STARTED_PROFILER;
 
-  if (saveToDownloads) {
-    downloadJsonFile(
-      convertToHermesProfilerFormat(trace),
-      `trace-${new Date().toISOString()}`
+  const fileName = `trace-${new Date().toISOString()}`;
+  const hermesProfiler = convertToHermesProfilerFormat(trace);
+
+  downloadJsonFile(hermesProfiler, fileName);
+
+  if (!saveToDownloads) {
+    console.warn(
+      "Specifying `saveToDownloads=false` on web doesn't make sense, since trace will be lost in this case"
     );
   }
 
   return '';
 }
-
-type Sample = {
-  stackId?: number;
-  timestamp: number;
-};
-type Stack = {
-  frameId: number;
-  parentId?: number;
-};
-type Frame = {
-  name: string;
-  line?: number;
-  column?: number;
-  resourceId?: number;
-};
-type ProfilingTrace = {
-  frames: Frame[];
-  resources: string[];
-  samples: Sample[];
-  stacks: Stack[];
-};
 
 function downloadJsonFile(
   exportObj: Record<string, unknown>,
