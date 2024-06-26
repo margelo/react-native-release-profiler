@@ -106,7 +106,7 @@ export async function downloadProfile(
       .filter(Boolean)
       .join('.');
 
-    if (!packageNameWithSuffix) {
+    if (!packageNameWithSuffix && !local) {
       throw new Error(
         "Failed to retrieve the package name from the project's Android manifest file. Please provide the package name with the --appId flag."
       );
