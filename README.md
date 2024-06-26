@@ -12,6 +12,23 @@ Usually performance issues are profiled in debug builds, which could lead to fal
 
 **react-native-release-profiler** allows you to profile your app in release builds, both in a local environment to profile specific issues, as well as in a production environment to spot regressions or collect performance samples from a wider variety of user devices.
 
+## Web support
+
+The web support is based on sampling [JS Self-Profiling](https://wicg.github.io/js-self-profiling/) API, so not all browsers support it yet. To see in which browsers it is supported, check [this page](https://caniuse.com/mdn-api_profiler).
+
+To make it possible to work you'll need to add `'Document-Policy': 'js-profiling'` header to your server response. Using `webpack` in dev mode you can do that by adding these lines to your `webpack.config.js`:
+
+```js
+devServer: {
+    headers: {
+        'Document-Policy': 'js-profiling',
+    },
+}
+```
+
+> [!WARNING]
+> By default sampling interval is set to 10 milliseconds. This is the lowest supported interval, but on Windows machines this interval will be 16 milliseconds.
+
 ## Need help?
 
 If you're having performance problems in your app, feel free to reach out to us at hello@margelo.io. We do this a lot. 😉
@@ -45,7 +62,7 @@ cd ios && pod install
         ```
         npx react-native-release-profiler --fromDownload --appId <your appId>
         ```
-    - On **iOS**:
+    - On **iOS** and **web**:
         ```
         npx react-native-release-profiler --local <path to profile>
         ```

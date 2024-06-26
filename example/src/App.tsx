@@ -2,13 +2,14 @@ import * as React from 'react';
 
 import { StyleSheet, View, Text } from 'react-native';
 import { startProfiling, stopProfiling } from 'react-native-release-profiler';
-import Share from 'react-native-share';
+import Share from './Share';
 
 startProfiling();
 
 setTimeout(async () => {
   const path = await stopProfiling(true);
   const actualPath = `file://${path}`;
+
   Share.open({
     url: actualPath,
   })
@@ -29,10 +30,10 @@ function FFFF() {
 }
 
 export default function App() {
-  const [result, _] = React.useState<number | undefined>();
+  const [result, setResult] = React.useState<number | undefined>();
 
   React.useEffect(() => {
-    FFFF();
+    setResult(FFFF());
   }, []);
 
   return (
