@@ -4,8 +4,9 @@ interface Config {
   project: {
     android: {
       packageName: string;
-    }
-  }
+    };
+  };
+  root: string;
 }
 
 function getConfig(): Promise<Config | null> {
