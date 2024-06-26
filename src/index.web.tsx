@@ -83,11 +83,11 @@ export async function stopProfiling(saveToDownloads = false): Promise<string> {
 
   if (!saveToDownloads) {
     console.warn(
-      'Specifying `saveToDownloads=false` is not supported on web, as downloading is the only possible way to store the trace file'
+      'Specifying `saveToDownloads=false` is not supported on web, as downloading is the only one possible way to store the trace file'
     );
   }
 
-  return '';
+  return fileName;
 }
 
 function downloadJsonFile(
