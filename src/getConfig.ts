@@ -18,7 +18,12 @@ function getConfig(): Promise<Config | null> {
         return;
       }
 
-      resolve(JSON.parse(stdout));
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (e) {
+        console.error(`JSON.parse error: ${e}`);
+        reject(e);
+      }
 
       if (stderr) {
         resolve(null);
