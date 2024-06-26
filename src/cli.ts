@@ -106,7 +106,7 @@ export async function downloadProfile(
       .filter(Boolean)
       .join('.');
 
-    if (!packageNameWithSuffix) {
+    if (!packageNameWithSuffix && !local) {
       throw new Error(
         "Failed to retrieve the package name from the project's Android manifest file. Please provide the package name with the --appId flag."
       );
@@ -127,7 +127,7 @@ export async function downloadProfile(
     logger.info(`File to be pulled: ${file}`);
 
     // If destination path is not specified, pull to the current directory
-    dstPath = dstPath || ctx?.root || './';
+    dstPath = dstPath || ctx?.root || '.';
 
     logger.debug('Internal commands run to pull the file:');
 
@@ -237,7 +237,7 @@ program
 program.parse();
 
 const options = program.opts();
-const dstPath = './';
+const dstPath = '.';
 downloadProfile(
   options.local,
   options.fromDownload,
