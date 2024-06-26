@@ -169,7 +169,7 @@
     ]
   },
   "dependencies": {
-    "@react-native-community/cli": "^12.2.1",
-    "commander": "^11.1.0"
+    "commander": "^11.1.0",
+    "hermes-profile-transformer": "^0.0.9"
   }
 }

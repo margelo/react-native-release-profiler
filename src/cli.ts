@@ -1,18 +1,13 @@
 #!/usr/bin/env node
-import getContext from '@react-native-community/cli-config';
 import { logger, CLIError } from '@react-native-community/cli-tools';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
-import type { Config } from '@react-native-community/cli-types';
 import transformer from 'hermes-profile-transformer';
-import {
-  findSourcemap,
-  generateSourcemap,
-} from '@react-native-community/cli-hermes/build/profileHermes/sourcemapUtils';
-import { getAndroidProject } from '@react-native-community/cli-platform-android';
-import { getMetroBundleOptions } from '@react-native-community/cli-hermes/build/profileHermes/metroBundleOptions';
+import { getMetroBundleOptions } from './getMetroBundleOptions';
+import { generateSourcemap, findSourcemap } from './sourcemapUtils';
+import getConfig from './getConfig';
 
 // Most of the file is just a copy of https://github.com/react-native-community/cli/blob/main/packages/cli-hermes/src/profileHermes/downloadProfile.ts
 
@@ -89,7 +84,6 @@ function maybeAddLineAndColumn(path: string): void {
  * @param appIdSuffix
  */
 export async function downloadProfile(
-  ctx: Config,
   local: string | undefined,
   fromDownload: Boolean | undefined,
   dstPath: string,
@@ -101,14 +95,22 @@ export async function downloadProfile(
   appId?: string,
   appIdSuffix?: string
 ) {
+  let ctx = await getConfig();
+
   try {
-    const androidProject = getAndroidProject(ctx);
+    const androidProject = ctx?.project.android;
     const packageNameWithSuffix = [
-      appId || androidProject.packageName,
+      appId || androidProject?.packageName,
       appIdSuffix,
     ]
       .filter(Boolean)
       .join('.');
+
+    if (!packageNameWithSuffix) {
+      throw new Error(
+        "Failed to retrieve the package name from the project's Android manifest file. Please provide the package name with the --appId flag."
+      );
+    }
 
     // If file name is not specified, pull the latest file from device
     let file =
@@ -125,7 +127,7 @@ export async function downloadProfile(
     logger.info(`File to be pulled: ${file}`);
 
     // If destination path is not specified, pull to the current directory
-    dstPath = dstPath || ctx.root;
+    dstPath = dstPath || ctx?.root || './';
 
     logger.debug('Internal commands run to pull the file:');
 
@@ -162,7 +164,7 @@ export async function downloadProfile(
         );
       }
       maybeAddLineAndColumn(tempFilePath);
-      const bundleOptions = getMetroBundleOptions(tempFilePath);
+      const bundleOptions = getMetroBundleOptions(tempFilePath, 'localhost');
 
       // If path to source map is not given
       if (!sourcemapPath) {
@@ -237,7 +239,6 @@ program.parse();
 const options = program.opts();
 const dstPath = './';
 downloadProfile(
-  getContext(),
   options.local,
   options.fromDownload,
   dstPath,
