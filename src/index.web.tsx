@@ -76,7 +76,7 @@ export async function stopProfiling(saveToDownloads = false): Promise<string> {
 
   profiler = NOT_STARTED_PROFILER;
 
-  const fileName = `trace-${new Date().toISOString()}`;
+  const fileName = `trace-${new Date().toISOString()}.cpuprofile.txt`;
   const hermesProfiler = convertToHermesProfilerFormat(trace);
 
   downloadJsonFile(hermesProfiler, fileName);
@@ -100,7 +100,7 @@ function downloadJsonFile(
   const downloadAnchorNode = document.createElement('a');
 
   downloadAnchorNode.setAttribute('href', dataStr);
-  downloadAnchorNode.setAttribute('download', exportName + '.cpuprofile.txt');
+  downloadAnchorNode.setAttribute('download', exportName);
   document.body.appendChild(downloadAnchorNode); // required for Firefox
   downloadAnchorNode.click();
   downloadAnchorNode.remove();
