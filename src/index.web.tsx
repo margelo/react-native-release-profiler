@@ -71,12 +71,14 @@ export function startProfiling(): boolean {
   return true;
 }
 
-export async function stopProfiling(saveToDownloads = false): Promise<string> {
+export async function stopProfiling(
+  saveToDownloads = false,
+  fileName = `trace-${new Date().toISOString()}.cpuprofile.txt`
+): Promise<string> {
   const trace = await profiler.stop();
 
   profiler = NOT_STARTED_PROFILER;
 
-  const fileName = `trace-${new Date().toISOString()}.cpuprofile.txt`;
   const hermesProfiler = convertToHermesProfilerFormat(trace);
 
   downloadJsonFile(hermesProfiler, fileName);

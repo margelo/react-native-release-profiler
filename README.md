@@ -80,9 +80,9 @@ cd ios && pod install
 
 Synchronously starts the Hermes Profiling Session.
 
-### `stopProfiling(saveInDownloadsDirectory: boolean): Promise<string>`
+### `stopProfiling(saveInDownloadsDirectory?: boolean, fileName?: string): Promise<string>`
 
-Asynchronously stops the Hermes Profiling Session, and saves the file in a cache or downloads directory if `saveInDownloadsDirectory` is `true`.
+Asynchronously stops the Hermes Profiling Session, and saves the file in a cache or downloads directory if `saveInDownloadsDirectory` is `true` using the provided `fileName` (web only).
 
 Returns the path of the saved profile.
 
