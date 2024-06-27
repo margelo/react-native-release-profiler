@@ -18,7 +18,15 @@ function getConfig(): Promise<Config | null> {
         return;
       }
 
-      resolve(JSON.parse(stdout));
+      try {
+        const config = JSON.parse(stdout);
+        resolve(config);
+      } catch (e) {
+        console.error(
+          `Failed to parse the output of "npx react-native config" to JSON. Are you sure the output returns a JSON-only string?\nError: ${e}`
+        );
+        reject(e);
+      }
 
       if (stderr) {
         resolve(null);
