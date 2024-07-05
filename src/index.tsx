@@ -17,10 +17,13 @@ const ReleaseProfiler = NativeModules.ReleaseProfiler
       }
     );
 
-export function startProfiling(): Boolean {
+export function startProfiling(): boolean {
   return ReleaseProfiler.startProfiling();
 }
 
-export function stopProfiling(saveToDownloads = false): Promise<string> {
+export function stopProfiling(
+  saveToDownloads = false,
+  _fileName = ''
+): Promise<string> {
   return ReleaseProfiler.stopProfiling(saveToDownloads);
 }
