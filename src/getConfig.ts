@@ -29,8 +29,8 @@ function getConfig(): Promise<Config | null> {
       }
 
       if (stderr) {
-        resolve(null);
-        throw new Error(stderr);
+        console.warn("The following problem occured during retrieving the app's config:");
+        console.warn(stderr);
       }
     });
   });
