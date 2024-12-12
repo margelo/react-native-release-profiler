@@ -11,6 +11,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.Promise
 import java.io.File
+import java.io.FileOutputStream
 import java.net.URL
 
 class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
@@ -34,40 +35,43 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
   fun stopProfiling(saveToDownloads: Boolean, promise: Promise) {
     val tempFile = File.createTempFile(
       "sampling-profiler-trace", ".cpuprofile", reactContext.getCacheDir())
-    val outputPath =  tempFile.getPath();
-    HermesSamplingProfiler.dumpSampledTraceToFile(outputPath);
-    HermesSamplingProfiler.disable();
+    val outputPath =  tempFile.getPath()
+    HermesSamplingProfiler.dumpSampledTraceToFile(outputPath)
+    HermesSamplingProfiler.disable()
     Toast.makeText(
             reactContext,
             "Saved results from Profiler to " + outputPath,
             Toast.LENGTH_LONG)
-        .show();
+        .show()
 
     if (saveToDownloads) {
       val fileName = tempFile.name
-      val contentValues = ContentValues().apply {
-        put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-      }
 
-      val resolver = reactContext.contentResolver
-      val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-      } else {
-        TODO( "VERSION.SDK_INT M Q")
-      }
-      if (uri != null) {
-        try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val contentValues = ContentValues().apply {
+          put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+          put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+          put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+        }
+        val resolver = reactContext.contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+        if (uri != null) {
           URL("file://$outputPath").openStream().use {input ->
             resolver.openOutputStream(uri).use { output ->
               input.copyTo(output!!, DEFAULT_BUFFER_SIZE)
             }
           }
-          promise.resolve(uri.path)
-          return
-        } catch (e: Exception) {
+        }
+      } else {
+        val file = File(
+          Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+          fileName
+        )
 
+        URL("file://$outputPath").openStream().use { input ->
+          FileOutputStream(file).use { output ->
+            input.copyTo(output)
+          }
         }
       }
     }
