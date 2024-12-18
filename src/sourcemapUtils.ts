@@ -3,7 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import type { SourceMap } from 'hermes-profile-transformer';
+import type { SourceMap } from '@margelo/hermes-profile-transformer';
 import type { MetroBundleOptions } from './getMetroBundleOptions';
 
 type Config = any;

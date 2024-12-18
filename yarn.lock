@@ -2465,6 +2465,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@margelo/hermes-profile-transformer@npm:^0.0.10":
+  version: 0.0.10
+  resolution: "@margelo/hermes-profile-transformer@npm:0.0.10"
+  dependencies:
+    source-map: ^0.7.3
+  checksum: 6ae29435917dc2a0da256a5d83d041d27c99625b72158e7ba73a22fa7cf2a76b5a09630d898917b134f2cb5ed2bb737db2c114f1ce30ba1e5712bd6f5d9ce315
+  languageName: node
+  linkType: hard
+
 "@nicolo-ribaudo/eslint-scope-5-internals@npm:5.1.1-v1":
   version: 5.1.1-v1
   resolution: "@nicolo-ribaudo/eslint-scope-5-internals@npm:5.1.1-v1"
@@ -8127,15 +8136,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hermes-profile-transformer@npm:^0.0.9":
-  version: 0.0.9
-  resolution: "hermes-profile-transformer@npm:0.0.9"
-  dependencies:
-    source-map: ^0.7.3
-  checksum: 227f8619535807ca58d6f084267c450c21904ebd7b1576b4a522576a7ad24ba6f2a9a41dcb6e2ad5b1a9834e8f09bc4078d1a5d6dc63d72fccc293d618d89749
-  languageName: node
-  linkType: hard
-
 "hosted-git-info@npm:^2.1.4":
   version: 2.8.9
   resolution: "hosted-git-info@npm:2.8.9"
@@ -12630,6 +12630,7 @@ __metadata:
   dependencies:
     "@commitlint/config-conventional": ^17.0.2
     "@evilmartians/lefthook": ^1.5.0
+    "@margelo/hermes-profile-transformer": ^0.0.10
     "@react-native/eslint-config": ^0.72.2
     "@release-it/conventional-changelog": ^5.0.0
     "@types/jest": ^28.1.2
@@ -12641,7 +12642,6 @@ __metadata:
     eslint: ^8.4.1
     eslint-config-prettier: ^8.5.0
     eslint-plugin-prettier: ^4.0.0
-    hermes-profile-transformer: ^0.0.9
     jest: ^28.1.1
     pod-install: ^0.1.0
     prettier: ^2.0.5

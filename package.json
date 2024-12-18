@@ -169,7 +169,7 @@
     ]
   },
   "dependencies": {
-    "commander": "^11.1.0",
-    "hermes-profile-transformer": "^0.0.9"
+    "@margelo/hermes-profile-transformer": "^0.0.10",
+    "commander": "^11.1.0"
   }
 }
