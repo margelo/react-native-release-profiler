@@ -1,6 +1,6 @@
 {
   "name": "react-native-release-profiler",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A fast and simple library to passively profile JS/Hermes performance in production and release builds.",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
