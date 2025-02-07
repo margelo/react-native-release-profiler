@@ -1,7 +1,7 @@
 // Copy of https://github.com/react-native-community/cli/blob/13.x/packages/cli-hermes/src/profileHermes/metroBundleOptions.ts as `cli-hermes` was recently removed from React Native Community CLI
 
 import fs from 'fs';
-import type { HermesCPUProfile } from 'hermes-profile-transformer/dist/types/HermesProfile';
+import type { HermesCPUProfile } from '@margelo/hermes-profile-transformer/dist/types/HermesProfile';
 
 export interface MetroBundleOptions {
   platform: string;

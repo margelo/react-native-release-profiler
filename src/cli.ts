@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
-import transformer from 'hermes-profile-transformer';
+import transformer from '@margelo/hermes-profile-transformer';
 import { getMetroBundleOptions } from './getMetroBundleOptions';
 import { generateSourcemap, findSourcemap } from './sourcemapUtils';
 import getConfig from './getConfig';
