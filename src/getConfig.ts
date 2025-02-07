@@ -11,7 +11,10 @@ interface Config {
 
 function getConfig(): Promise<Config | null> {
   return new Promise((resolve, reject) => {
-    exec('npx react-native config', (error, stdout, stderr) => {
+    // Get path to react-native binary:
+    const reactNativePath = require.resolve('react-native/cli.js');
+
+    exec(`${reactNativePath} config`, (error, stdout, stderr) => {
       if (error) {
         console.error(`exec error: ${error}`);
         reject(error);
@@ -26,11 +29,17 @@ function getConfig(): Promise<Config | null> {
           `Failed to parse the output of "npx react-native config" to JSON. Are you sure the output returns a JSON-only string?\nError: ${e}`
         );
         reject(e);
+        return;
       }
 
+      // If we get here it means that the config object could be parsed as JSON, so we can assume
+      // that loading the config went fine. We still want to inform about any warnings or errors
+      // that might have occured along the way:
       if (stderr) {
-        resolve(null);
-        throw new Error(stderr);
+        console.warn(
+          "The following problem occured during retrieving the app's config:"
+        );
+        console.warn(stderr);
       }
     });
   });
