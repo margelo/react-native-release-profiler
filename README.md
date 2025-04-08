@@ -40,6 +40,14 @@ yarn add react-native-release-profiler
 cd ios && pod install
 ```
 
+### Expo
+
+Expo requires you to also install @react-native-community/cli
+
+```sh
+yarn add --dev @react-native-community/cli
+```
+
 ## Usage
 
 1. Install **react-native-release-profiler**
