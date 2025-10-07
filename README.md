@@ -37,7 +37,7 @@ If you're having performance problems in your app, feel free to reach out to us 
 
 ```sh
 yarn add react-native-release-profiler
-cd ios && pod install
+cd ios && bundle install && bundle exec pod install
 ```
 
 ### Expo

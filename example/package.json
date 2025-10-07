@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "android": "react-native run-android",
+    "pods": "cd ios && bundle exec pod install",
     "ios": "react-native run-ios",
     "web": "webpack serve --mode=development --config webpack.config.js",
     "start": "react-native start",
@@ -27,7 +28,6 @@
     "babel-plugin-react-native-web": "^0.19.12",
     "html-webpack-plugin": "^5.6.0",
     "metro-react-native-babel-preset": "0.76.8",
-    "pod-install": "^0.1.0",
     "ts-loader": "^9.5.1",
     "url-loader": "^4.1.1",
     "webpack": "^5.92.1",
