@@ -2,7 +2,11 @@
 #import <hermes/hermes.h>
 #include <React/ReactNativeVersion.h>
 
-#if REACT_NATIVE_VERSION_MINOR >= 81
+#define IS_RN_VERSION_0_81_OR_HIGHER                                           \
+  (REACT_NATIVE_VERSION_MAJOR > 0 ||                                           \
+   (REACT_NATIVE_VERSION_MAJOR == 0 && REACT_NATIVE_VERSION_MINOR >= 81))
+
+#if IS_RN_VERSION_0_81_OR_HIGHER
 using namespace facebook::hermes;
 using namespace facebook::jsi;
 #endif
@@ -19,7 +23,7 @@ RCT_EXTERN_METHOD(multiply:(float)a withB:(float)b
 }
 
 RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(startProfiling) {
-#if REACT_NATIVE_VERSION_MINOR >= 81
+#if IS_RN_VERSION_0_81_OR_HIGHER
     IHermesRootAPI *api = castInterface<IHermesRootAPI>(makeHermesRootAPI());
     api->enableSamplingProfiler();
 #else
@@ -41,7 +45,7 @@ RCT_EXPORT_METHOD(stopProfiling:(BOOL)saveInDownload
                                             contents:[@"" dataUsingEncoding:NSUTF8StringEncoding]
                                     attributes:nil];
 
-#if REACT_NATIVE_VERSION_MINOR >= 81
+#if IS_RN_VERSION_0_81_OR_HIGHER
     IHermesRootAPI *api = castInterface<IHermesRootAPI>(makeHermesRootAPI());
     api->dumpSampledTraceToFile(finalPath);
     api->disableSamplingProfiler();
