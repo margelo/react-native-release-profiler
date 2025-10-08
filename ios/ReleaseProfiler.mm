@@ -1,10 +1,18 @@
 #import <React/RCTBridgeModule.h>
 #import <hermes/hermes.h>
-#include <React/ReactNativeVersion.h>
 
+#ifdef __has_include
+#if __has_include(<React/ReactNativeVersion.h>)
+#include <React/ReactNativeVersion.h>
 #define IS_RN_VERSION_0_81_OR_HIGHER                                           \
   (REACT_NATIVE_VERSION_MAJOR > 0 ||                                           \
    (REACT_NATIVE_VERSION_MAJOR == 0 && REACT_NATIVE_VERSION_MINOR >= 81))
+#else
+#define IS_RN_VERSION_0_81_OR_HIGHER false
+#endif
+#else
+#define IS_RN_VERSION_0_81_OR_HIGHER false
+#endif
 
 #if IS_RN_VERSION_0_81_OR_HIGHER
 using namespace facebook::hermes;
