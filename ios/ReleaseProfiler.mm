@@ -1,8 +1,11 @@
 #import <React/RCTBridgeModule.h>
 #import <hermes/hermes.h>
+#include <React/ReactNativeVersion.h>
 
+#if REACT_NATIVE_VERSION_MINOR >= 81
 using namespace facebook::hermes;
 using namespace facebook::jsi;
+#endif
 
 @interface RCT_EXTERN_MODULE(ReleaseProfiler, NSObject)
 
@@ -16,8 +19,13 @@ RCT_EXTERN_METHOD(multiply:(float)a withB:(float)b
 }
 
 RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(startProfiling) {
+#if REACT_NATIVE_VERSION_MINOR >= 81
     IHermesRootAPI *api = castInterface<IHermesRootAPI>(makeHermesRootAPI());
     api->enableSamplingProfiler();
+#else
+    facebook::hermes::HermesRuntime::enableSamplingProfiler();
+#endif
+
     return [NSNumber numberWithInt:1];
 }
 
@@ -32,9 +40,16 @@ RCT_EXPORT_METHOD(stopProfiling:(BOOL)saveInDownload
     [sharedFM createFileAtPath:fileURL.path
                                             contents:[@"" dataUsingEncoding:NSUTF8StringEncoding]
                                     attributes:nil];
+
+#if REACT_NATIVE_VERSION_MINOR >= 81
     IHermesRootAPI *api = castInterface<IHermesRootAPI>(makeHermesRootAPI());
     api->dumpSampledTraceToFile(finalPath);
     api->disableSamplingProfiler();
+#else
+    facebook::hermes::HermesRuntime::dumpSampledTraceToFile(finalPath);
+    facebook::hermes::HermesRuntime::disableSamplingProfiler();
+#endif
+
     resolve(fileURL.path);
 }
 
