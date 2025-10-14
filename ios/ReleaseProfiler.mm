@@ -2,14 +2,19 @@
 #import <hermes/hermes.h>
 
 #ifdef __has_include
-#if __has_include(<React/ReactNativeVersion.h>)
+#if __has_include(<cxxreact/ReactNativeVersion.h>)
+#define EXISTS_REACT_NATIVE_VERSION_HEADER
+#include <cxxreact/ReactNativeVersion.h>
+#elif __has_include(<React/ReactNativeVersion.h>)
+#def EXISTS_REACT_NATIVE_VERSION_HEADER
 #include <React/ReactNativeVersion.h>
+#endif
+#endif
+
+#ifdef EXISTS_REACT_NATIVE_VERSION_HEADER
 #define IS_RN_VERSION_0_81_OR_HIGHER                                           \
   (REACT_NATIVE_VERSION_MAJOR > 0 ||                                           \
    (REACT_NATIVE_VERSION_MAJOR == 0 && REACT_NATIVE_VERSION_MINOR >= 81))
-#else
-#define IS_RN_VERSION_0_81_OR_HIGHER false
-#endif
 #else
 #define IS_RN_VERSION_0_81_OR_HIGHER false
 #endif
