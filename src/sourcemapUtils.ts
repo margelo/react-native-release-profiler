@@ -39,8 +39,15 @@ async function getSourcemapFromServer(
   const requestURL = `http://${host}:${port}/index.map?platform=${platform}&dev=${dev}&minify=${minify}`;
   console.log(`Downloading from ${requestURL}`);
   try {
-    // @ts-ignore
-    const { data } = await fetch(requestURL);
+    const res = await fetch(requestURL);
+    const data = await res.json();
+    if (typeof data !== 'object') {
+      console.log(
+        `Failed to fetch source map from "${requestURL}", unexpected response format.`
+      );
+      return undefined;
+    }
+
     return data as SourceMap;
   } catch (e) {
     console.log(`Failed to fetch source map from "${requestURL}"`);

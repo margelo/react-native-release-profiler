@@ -9,6 +9,7 @@ type Profiler = {
 };
 
 declare global {
+  // @ts-expect-error
   const Profiler: Profiler;
   interface Window {
     Profiler: Profiler;
