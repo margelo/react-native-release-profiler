@@ -30,21 +30,56 @@ function writeJsonSync(targetPath: string, data: any) {
   }
 }
 
+/**
+ * Returns the Metro bundle entry point path derived from the project's
+ * package.json `main` field.
+ *
+ * Expo SDK 55+ (and any project using expo-router) sets `"main":
+ * "expo-router/entry"` instead of the default `"index"`. Metro serves the
+ * source map for that bundle at `/node_modules/expo-router/entry.map`, not
+ * `/index.map`. When the wrong URL is used Metro responds with an
+ * `UnableToResolveError` JSON object, which then crashes the source-map
+ * consumer because the expected `sources` array is missing.
+ */
+function getMetroEntryPoint(): string {
+  try {
+    const pkgPath = path.join(process.cwd(), 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    const main: string | undefined = pkg.main;
+    if (main && main !== 'index' && main !== './index') {
+      // Bare relative path: strip leading "./"
+      if (main.startsWith('./')) {
+        return main.slice(2);
+      }
+      // Package-style path (e.g. "expo-router/entry"): Metro serves it
+      // under node_modules/
+      return `node_modules/${main}`;
+    }
+  } catch {
+    // Fall through to the default entry point.
+  }
+  return 'index';
+}
+
 async function getSourcemapFromServer(
   port: string,
   { platform, dev, minify, host }: MetroBundleOptions
 ): Promise<SourceMap | undefined> {
   console.log('Getting source maps from Metro packager server');
 
-  const requestURL = `http://${host}:${port}/index.map?platform=${platform}&dev=${dev}&minify=${minify}`;
+  const entryPoint = getMetroEntryPoint();
+  const requestURL = `http://${host}:${port}/${entryPoint}.map?platform=${platform}&dev=${dev}&minify=${minify}`;
   console.log(`Downloading from ${requestURL}`);
   try {
     const res = await fetch(requestURL);
     const data = await res.json();
-    if (typeof data !== 'object') {
+    if (typeof data !== 'object' || !Array.isArray((data as any).sources)) {
       console.log(
         `Failed to fetch source map from "${requestURL}", unexpected response format.`
       );
+      if (data && (data as any).type && (data as any).message) {
+        console.log(`Metro error: ${(data as any).message}`);
+      }
       return undefined;
     }
 
