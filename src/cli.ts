@@ -8,6 +8,7 @@ import transformer from '@margelo/hermes-profile-transformer';
 import { getMetroBundleOptions } from './getMetroBundleOptions';
 import { generateSourcemap, findSourcemap } from './sourcemapUtils';
 import getConfig from './getConfig';
+import { createIOSProfileCopy } from './iosProfile';
 
 // Most of the file is just a copy of https://github.com/react-native-community/cli/blob/main/packages/cli-hermes/src/profileHermes/downloadProfile.ts
 
@@ -93,9 +94,25 @@ export async function downloadProfile(
   shouldGenerateSourcemap?: boolean,
   port: string = '8081',
   appId?: string,
-  appIdSuffix?: string
+  appIdSuffix?: string,
+  platform: string = 'android',
+  device?: string
 ) {
-  let ctx = await getConfig();
+  if (platform !== 'android' && platform !== 'ios') {
+    throw new Error('--platform must be android or ios.');
+  }
+  const copyIOSProfile =
+    platform === 'ios' && !local
+      ? createIOSProfileCopy(
+          device,
+          appId ? [appId, appIdSuffix].filter(Boolean).join('.') : undefined,
+          filename,
+          fromDownload
+        )
+      : undefined;
+  // iOS uses an explicit bundle identifier and does not need Android project config.
+  const ctx = platform === 'ios' ? null : await getConfig();
+  let temporaryDirectory: string | undefined;
 
   try {
     const androidProject = ctx?.project.android;
@@ -106,7 +123,7 @@ export async function downloadProfile(
       .filter(Boolean)
       .join('.');
 
-    if (!packageNameWithSuffix && !local) {
+    if (platform === 'android' && !packageNameWithSuffix && !local) {
       throw new Error(
         "Failed to retrieve the package name from the project's Android manifest file. Please provide the package name with the --appId flag."
       );
@@ -115,6 +132,7 @@ export async function downloadProfile(
     // If file name is not specified, pull the latest file from device
     let file =
       filename ||
+      (local ? path.basename(local) : undefined) ||
       (fromDownload
         ? getLatestFileFromDownloads()
         : getLatestFile(packageNameWithSuffix));
@@ -133,7 +151,14 @@ export async function downloadProfile(
 
     // If --raw, pull the hermes profile to dstPath
     if (raw) {
-      if (fromDownload) {
+      if (local) {
+        const destination = path.resolve(dstPath, file);
+        if (path.resolve(local) !== destination) {
+          fs.copyFileSync(local, destination);
+        }
+      } else if (copyIOSProfile) {
+        copyIOSProfile(path.join(dstPath, file));
+      } else if (fromDownload) {
         execSyncWithLog(
           `adb shell cat /sdcard/Download/${file} > ${dstPath}/${file}`
         );
@@ -149,11 +174,15 @@ export async function downloadProfile(
 
     // Else: transform the profile to Chrome format and pull it to dstPath
     else {
-      const osTmpDir = os.tmpdir();
-      const tempFilePath = path.join(osTmpDir, file);
+      temporaryDirectory = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'release-profiler-')
+      );
+      const tempFilePath = path.join(temporaryDirectory, path.basename(file));
 
       if (local) {
         fs.copyFileSync(local, tempFilePath);
+      } else if (copyIOSProfile) {
+        copyIOSProfile(tempFilePath);
       } else if (fromDownload) {
         execSyncWithLog(
           `adb shell cat /sdcard/Download/${file} > ${tempFilePath}`
@@ -165,11 +194,14 @@ export async function downloadProfile(
       }
       maybeAddLineAndColumn(tempFilePath);
       const bundleOptions = getMetroBundleOptions(tempFilePath, 'localhost');
+      if (platform === 'ios') {
+        bundleOptions.platform = 'ios';
+      }
 
       // If path to source map is not given
       if (!sourcemapPath) {
         // Get or generate the source map
-        if (shouldGenerateSourcemap) {
+        if (shouldGenerateSourcemap || platform === 'ios') {
           sourcemapPath = await generateSourcemap(port, bundleOptions);
         } else {
           sourcemapPath = await findSourcemap(ctx, port, bundleOptions);
@@ -181,7 +213,9 @@ export async function downloadProfile(
             'Cannot find source maps, running the transformer without it'
           );
           logger.info(
-            'Instructions on how to get source maps: set `bundleInDebug: true` in your app/build.gradle file, inside the `project.ext.react` map.'
+            platform === 'ios'
+              ? 'Provide --sourcemap-path with the source map from the profiled iOS build.'
+              : 'Instructions on how to get source maps: set `bundleInDebug: true` in your app/build.gradle file, inside the `project.ext.react` map.'
           );
         }
       }
@@ -207,8 +241,10 @@ export async function downloadProfile(
         `Successfully converted to Chrome tracing format and pulled the file to ${transformedFilePath}`
       );
     }
-  } catch (e) {
-    throw e;
+  } finally {
+    if (temporaryDirectory) {
+      fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
   }
 }
 
@@ -221,32 +257,44 @@ function getFilename(path?: string) {
   return res;
 }
 
-const { program } = require('commander');
+if (require.main === module) {
+  const { program } = require('commander');
 
-program
-  .option('--filename <string>')
-  .option('--sourcemap-path <string>')
-  .option('--generate-sourcemap')
-  .option('--port <number>')
-  .option('--appId <string>')
-  .option('--appIdSuffix <string>')
-  .option('--fromDownload')
-  .option('--raw')
-  .option('--local <string>');
+  program
+    .option('--platform <string>', 'Device platform: android or ios', 'android')
+    .option('--device <string>', 'iOS device identifier or name from devicectl')
+    .option(
+      '--filename <string>',
+      'Profile basename (required for iOS device downloads)'
+    )
+    .option('--sourcemap-path <string>')
+    .option('--generate-sourcemap')
+    .option('--port <number>')
+    .option('--appId <string>')
+    .option('--appIdSuffix <string>')
+    .option('--fromDownload')
+    .option('--raw')
+    .option('--local <string>');
 
-program.parse();
+  program.parse();
 
-const options = program.opts();
-const dstPath = '.';
-downloadProfile(
-  options.local,
-  options.fromDownload,
-  dstPath,
-  options.filename || getFilename(options.local),
-  options.sourcemapPath,
-  options.raw,
-  options.generateSourcemap,
-  options.port,
-  options.appId,
-  options.appIdSuffix
-);
+  const options = program.opts();
+  const dstPath = '.';
+  downloadProfile(
+    options.local,
+    options.fromDownload,
+    dstPath,
+    options.filename || getFilename(options.local),
+    options.sourcemapPath,
+    options.raw,
+    options.generateSourcemap,
+    options.port,
+    options.appId,
+    options.appIdSuffix,
+    options.platform,
+    options.device
+  ).catch((error: Error) => {
+    logger.error(error.message);
+    process.exitCode = 1;
+  });
+}
