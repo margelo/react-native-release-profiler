@@ -133,7 +133,6 @@ test('converts the extracted trace and requests an iOS source map', async () => 
 });
 
 test.each([
-  [{ device: undefined }, '--device'],
   [{ appId: undefined }, '--appId'],
   [{ filename: undefined }, '--filename'],
   [{ filename: '../profile.cpuprofile' }, '--filename'],
@@ -215,4 +214,140 @@ test('uses an explicitly supplied source map for iOS conversion', async () => {
   );
   expect(generateSourcemap).not.toHaveBeenCalled();
   expect(findSourcemap).not.toHaveBeenCalled();
+});
+
+function mockDeviceList(devices: unknown[]) {
+  (execFileSync as jest.Mock).mockImplementation((_command, args: string[]) => {
+    if (args.includes('--json-output')) {
+      fs.writeFileSync(
+        args[args.indexOf('--json-output') + 1]!,
+        JSON.stringify({ result: { devices } })
+      );
+    } else {
+      fs.writeFileSync(args[args.indexOf('--destination') + 1]!, profile);
+    }
+  });
+}
+
+const availableDevice = {
+  identifier: 'phone-id',
+  hardwareProperties: { platform: 'iOS', reality: 'physical' },
+  connectionProperties: { pairingState: 'paired', tunnelState: 'connected' },
+  deviceProperties: { name: 'Test iPhone' },
+};
+
+test.each(['connected', 'disconnected'])(
+  'automatically selects the only available iOS device (%s)',
+  async (tunnelState) => {
+    mockDeviceList([
+      {
+        ...availableDevice,
+        connectionProperties: { pairingState: 'paired', tunnelState },
+      },
+      {
+        ...availableDevice,
+        identifier: 'offline',
+        connectionProperties: {
+          pairingState: 'paired',
+          tunnelState: 'unavailable',
+        },
+      },
+      {
+        ...availableDevice,
+        identifier: 'watch',
+        hardwareProperties: { platform: 'watchOS' },
+      },
+      {
+        ...availableDevice,
+        identifier: 'simulator',
+        hardwareProperties: { platform: 'iOS', reality: 'simulated' },
+      },
+      {
+        ...availableDevice,
+        identifier: 'unpaired',
+        connectionProperties: {
+          pairingState: 'unpaired',
+          tunnelState: 'connected',
+        },
+      },
+    ]);
+    await download({ device: undefined });
+    const calls = (execFileSync as jest.Mock).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]![1]).toEqual([
+      'devicectl',
+      'list',
+      'devices',
+      '--json-output',
+      expect.any(String),
+    ]);
+    expect(calls[1]![1]).toEqual(
+      expect.arrayContaining(['--device', 'phone-id'])
+    );
+    expect(fs.existsSync(calls[0]![1][4])).toBe(false);
+    expect(fs.readFileSync(path.join(destination, filename), 'utf8')).toBe(
+      profile
+    );
+  }
+);
+
+test('requires an explicit choice when multiple iOS devices are available', async () => {
+  mockDeviceList([
+    availableDevice,
+    {
+      ...availableDevice,
+      identifier: 'other-id',
+      deviceProperties: { name: 'Other iPhone' },
+    },
+  ]);
+  await expect(download({ device: undefined })).rejects.toThrow(
+    /--device.*Test iPhone.*phone-id.*Other iPhone.*other-id/s
+  );
+  expect(execFileSync).toHaveBeenCalledTimes(1);
+});
+
+test('reports no available iOS devices', async () => {
+  mockDeviceList([]);
+  await expect(download({ device: undefined })).rejects.toThrow(
+    'No available paired iOS device'
+  );
+  expect(execFileSync).toHaveBeenCalledTimes(1);
+});
+
+test('explicit device selection bypasses discovery', async () => {
+  await download();
+  expect(execFileSync).toHaveBeenCalledTimes(1);
+  expect(execFileSync).not.toHaveBeenCalledWith(
+    'xcrun',
+    expect.arrayContaining(['list']),
+    expect.anything()
+  );
+});
+
+test.each(['invalid JSON', '{}'])(
+  'cleans up malformed device discovery output: %s',
+  async (output) => {
+    let jsonPath = '';
+    (execFileSync as jest.Mock).mockImplementation(
+      (_command, args: string[]) => {
+        jsonPath = args[args.indexOf('--json-output') + 1]!;
+        fs.writeFileSync(jsonPath, output);
+      }
+    );
+    await expect(download({ device: undefined })).rejects.toThrow();
+    expect(fs.existsSync(path.dirname(jsonPath))).toBe(false);
+    expect(execFileSync).toHaveBeenCalledTimes(1);
+  }
+);
+
+test('cleans up discovery files when devicectl fails', async () => {
+  let jsonPath = '';
+  (execFileSync as jest.Mock).mockImplementation((_command, args: string[]) => {
+    jsonPath = args[args.indexOf('--json-output') + 1]!;
+    throw new Error('devicectl unavailable');
+  });
+  await expect(download({ device: undefined })).rejects.toThrow(
+    'devicectl unavailable'
+  );
+  expect(fs.existsSync(path.dirname(jsonPath))).toBe(false);
 });

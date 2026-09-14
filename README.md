@@ -73,8 +73,14 @@ yarn add --dev @react-native-community/cli
     - On a physical **iOS** device (macOS with Xcode's `devicectl`):
         ```sh
         xcrun devicectl list devices
-        npx react-native-release-profiler --platform ios --device "<device ID or name>" --appId <bundle ID> --filename <profile-name.cpuprofile>
+        npx react-native-release-profiler --platform ios --appId <bundle ID> --filename <profile-name.cpuprofile>
         ```
+        When exactly one paired iOS device is available, the CLI selects it automatically.
+        Connected devices and available devices awaiting a tunnel connection are both
+        eligible; unavailable devices and other Apple platforms are ignored.
+        If multiple devices are available, pass `--device "<device ID or name>"`
+        to choose one. An explicit `--device` skips automatic discovery.
+
         Use the basename of the path returned by `stopProfiling()` for `--filename`.
         iOS always saves profiles in the app's `Library/Caches` directory, regardless
         of `saveInDownloadsDirectory`. The CLI copies that file using

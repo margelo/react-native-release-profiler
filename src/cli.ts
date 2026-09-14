@@ -262,7 +262,10 @@ if (require.main === module) {
 
   program
     .option('--platform <string>', 'Device platform: android or ios', 'android')
-    .option('--device <string>', 'iOS device identifier or name from devicectl')
+    .option(
+      '--device <string>',
+      'iOS device identifier or name (auto-selected when only one is available)'
+    )
     .option(
       '--filename <string>',
       'Profile basename (required for iOS device downloads)'

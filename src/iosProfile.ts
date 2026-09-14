@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import { resolveIOSDevice } from './iosDevice';
 
 /** Copy one profile from the cache directory used by ReleaseProfiler.mm. */
 export function createIOSProfileCopy(
@@ -10,11 +11,6 @@ export function createIOSProfileCopy(
   if (process.platform !== 'darwin') {
     throw new Error(
       'iOS device downloads require macOS and Xcode with devicectl.'
-    );
-  }
-  if (!device) {
-    throw new Error(
-      'Provide --device for iOS. Use "xcrun devicectl list devices" to find its identifier.'
     );
   }
   if (!bundleId) {
@@ -38,6 +34,8 @@ export function createIOSProfileCopy(
     );
   }
 
+  const selectedDevice = resolveIOSDevice(device);
+
   return (destination) => {
     // Separate arguments preserve spaces and avoid interpreting shell metacharacters.
     execFileSync(
@@ -48,7 +46,7 @@ export function createIOSProfileCopy(
         'copy',
         'from',
         '--device',
-        device,
+        selectedDevice,
         '--domain-type',
         'appDataContainer',
         '--domain-identifier',
