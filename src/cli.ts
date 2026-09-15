@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import transformer from '@margelo/hermes-profile-transformer';
 import { getMetroBundleOptions } from './getMetroBundleOptions';
 import { generateSourcemap, findSourcemap } from './sourcemapUtils';
+import { applyMetroFunctionNames } from './applyMetroFunctionNames';
 import getConfig from './getConfig';
 
 // Most of the file is just a copy of https://github.com/react-native-community/cli/blob/main/packages/cli-hermes/src/profileHermes/downloadProfile.ts
@@ -192,6 +193,9 @@ export async function downloadProfile(
         sourcemapPath,
         'index.bundle'
       );
+
+      // Apply metro function names to the events
+      applyMetroFunctionNames(events, sourcemapPath);
 
       const transformedFilePath = `${dstPath}/${path.basename(
         file,
