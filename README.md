@@ -111,6 +111,40 @@ if (artifacts.nativeStatus !== 'success') {
 Only one recording can run at a time. The existing Hermes-only API remains
 available on older Android versions and other supported platforms.
 
+#### Capture app startup
+
+Request native sampling from `MainApplication.onCreate()` before initializing
+React Native. This hook does not load the Hermes profiler bridge or start JS sampling:
+
+```kotlin
+import android.os.Build
+import com.releaseprofiler.NativeProfiling
+
+override fun onCreate() {
+  super.onCreate()
+  if (Build.VERSION.SDK_INT >= 35 && profilingEnabled) {
+    NativeProfiling.start(this)
+  }
+  loadReactNative(this) // Keep your existing RN/SoLoader initialization here.
+}
+```
+
+`profilingEnabled` is your own opt-in. On older React Native versions, keep your
+existing `SoLoader.init(...)` instead of adding `loadReactNative(...)`.
+
+Call `startProfilingSession()` from JS to enable Hermes sampling and adopt the
+native recording, then `session.stop(true)` to export both. Native sampling is
+not restarted, and the native start's options remain in effect. Without a native
+startup recording, the JS call starts both collectors.
+
+JS samples begin at the JS start call; Hermes initialization and earlier bundle
+execution are not captured by the Hermes sampler. Native sampling may cover
+that earlier work, but Android starts it asynchronously, so the first native
+startup instructions may still be missed. Clock anchors align both recordings
+in the CLI even though they start at different times.
+
+#### Stop and merge
+
 `startProfilingSession()` resolves when sampling is requested, not when native
 sampling begins. Android starts asynchronously, may clamp settings, and applies
 rate limits. `stop()` disables Hermes, requests native cancellation, and waits

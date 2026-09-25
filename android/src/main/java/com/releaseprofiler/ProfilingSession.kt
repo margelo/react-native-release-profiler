@@ -20,6 +20,23 @@ internal class ProfilingSessions(private val context: Context) {
   // Idle workers expire rather than retaining a thread.
   private val worker = ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS, LinkedBlockingQueue<Runnable>())
   private var active: Session? = null
+  private var legacyActive = false
+
+  @Synchronized fun startLegacy() {
+    check(active == null) { "A combined profiling session is already active" }
+    if (legacyActive) return
+    HermesProfilerBridge.enable()
+    legacyActive = true
+  }
+
+  @Synchronized fun stopLegacy(outputPath: String): Boolean {
+    if (active != null) return false
+    HermesProfilerBridge.disable()
+    HermesProfilerBridge.dumpSampledTraceToFile(outputPath)
+    legacyActive = false
+    return true
+  }
+
   private class Session(val id: String, val directory: File, val timeoutMs: Long) {
     val cancellation = CancellationSignal()
     val anchors = JSONArray()
@@ -32,6 +49,7 @@ internal class ProfilingSessions(private val context: Context) {
     var hermesFile: File? = null
     var completion: Promise? = null
     var stopped = false
+    var awaitingAdoption = false
     var saveToDownloads = false
     var timeout: Runnable? = null
   }
@@ -39,7 +57,12 @@ internal class ProfilingSessions(private val context: Context) {
   @Synchronized fun isActive() = active != null
 
   @Synchronized fun detachRuntime() {
+    if (legacyActive) {
+      try { HermesProfilerBridge.disable() } finally { legacyActive = false }
+    }
     val session = active ?: return
+    // A runtime owns a startup session only after JS explicitly adopts it.
+    if (session.awaitingAdoption) return
     session.timeout?.let { handler.removeCallbacks(it) }
     try {
       try {
@@ -79,28 +102,68 @@ internal class ProfilingSessions(private val context: Context) {
       promise.reject("E_UNSUPPORTED", "Native sampling requires Android 15 (API 35) or newer")
       return
     }
-    if (active != null) {
-      promise.reject("E_BUSY", "A profiling session is already active")
+    if (legacyActive) {
+      promise.reject("E_BUSY", "Legacy Hermes profiling is already active")
+      return
+    }
+    active?.let { session ->
+      if (session.awaitingAdoption && !session.stopped) {
+        try {
+          startHermes(session)
+          session.awaitingAdoption = false
+          promise.resolve(session.id)
+        } catch (error: Throwable) {
+          promise.reject("E_START", error)
+        }
+      } else {
+        promise.reject("E_BUSY", "A profiling session is already active")
+      }
+      return
+    }
+    val parameters = try {
+      intArrayOf(
+        positiveInt(options, "durationMs", 30000),
+        positiveInt(options, "samplingFrequencyHz", 100),
+        positiveInt(options, "bufferSizeKb", 8192),
+        positiveInt(options, "resultTimeoutMs", 120000)
+      )
+    } catch (error: Exception) {
+      promise.reject("E_OPTIONS", error)
       return
     }
     try {
-      val duration = positiveInt(options, "durationMs", 30000)
-      val frequency = positiveInt(options, "samplingFrequencyHz", 100)
-      val size = positiveInt(options, "bufferSizeKb", 8192)
-      val timeout = positiveInt(options, "resultTimeoutMs", 120000)
-      val session = prepare(duration, frequency, size, timeout)
-      try {
-        HermesProfilerBridge.enable()
-        promise.resolve(session.id)
-      } catch (error: Throwable) {
-        // Enable can fail partway through initialization; always attempt both cleanups.
-        try { HermesProfilerBridge.disable() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
-        try { session.cancellation.cancel() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
-        active = null
-        promise.reject("E_START", error)
-      }
-    } catch (error: Exception) {
-      promise.reject("E_OPTIONS", error)
+      promise.resolve(startSession(parameters[0], parameters[1], parameters[2], parameters[3], false))
+    } catch (error: Throwable) {
+      promise.reject("E_START", error)
+    }
+  }
+
+  @Synchronized fun startSession(
+    duration: Int, frequency: Int, size: Int, timeout: Int, awaitingAdoption: Boolean
+  ): String {
+    check(Build.VERSION.SDK_INT >= 35) { "Native sampling requires Android 15 (API 35) or newer" }
+    check(active == null && !legacyActive) { "A profiling session is already active" }
+    require(duration > 0 && frequency > 0 && size > 0 && timeout > 0) {
+      "Profiling options must be positive integers"
+    }
+    val session = prepare(duration, frequency, size, timeout)
+    session.awaitingAdoption = awaitingAdoption
+    if (!awaitingAdoption) startHermes(session)
+    return session.id
+  }
+
+  private fun startHermes(session: Session) {
+    try {
+      val anchor = clock()
+      session.anchors.put(anchor)
+      session.boundaries.put("hermesStart", anchor)
+      HermesProfilerBridge.enable()
+    } catch (error: Throwable) {
+      // Enable can fail partway through initialization; always attempt both cleanups.
+      try { HermesProfilerBridge.disable() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
+      try { session.cancellation.cancel() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
+      active = null
+      throw error
     }
   }
 
@@ -166,7 +229,7 @@ internal class ProfilingSessions(private val context: Context) {
 
   @Synchronized private fun stopSession(id: String, saveToDownloads: Boolean, completion: Promise) {
     val session = active
-    if (session == null || session.id != id || session.stopped) {
+    if (session == null || session.id != id || session.stopped || session.awaitingAdoption) {
       worker.execute { completion.reject("E_SESSION", "No matching running profiling session") }
       return
     }
@@ -280,4 +343,3 @@ internal class ProfilingSessions(private val context: Context) {
     }
   }
 }
-

@@ -18,16 +18,11 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
 
   val reactContext = reactContext
-  private val sessions = ProfilingSessions(reactContext)
-  private var legacyActive = false
+  private val sessions = NativeProfiling.sessions(reactContext)
 
   @ReactMethod
   @Synchronized
   fun startProfilingSession(options: ReadableMap, promise: Promise) {
-    if (legacyActive) {
-      promise.reject("E_BUSY", "Legacy Hermes profiling is already active")
-      return
-    }
     sessions.start(options, promise)
   }
 
@@ -39,10 +34,6 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
   @Synchronized
   override fun invalidate() {
     sessions.detachRuntime()
-    if (legacyActive) {
-      HermesProfilerBridge.disable()
-      legacyActive = false
-    }
     super.invalidate()
   }
 
@@ -55,10 +46,7 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
   @ReactMethod(isBlockingSynchronousMethod = true)
   @Synchronized
   fun startProfiling(): Boolean {
-    check(!sessions.isActive()) { "A combined profiling session is already active" }
-    if (legacyActive) return true
-    HermesProfilerBridge.enable();
-    legacyActive = true
+    sessions.startLegacy()
     return true
   }
 
@@ -72,9 +60,11 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
     val tempFile = File.createTempFile(
       "sampling-profiler-trace", ".cpuprofile", reactContext.getCacheDir())
     val outputPath =  tempFile.getPath()
-    HermesProfilerBridge.disable()
-    HermesProfilerBridge.dumpSampledTraceToFile(outputPath)
-    legacyActive = false
+    if (!sessions.stopLegacy(outputPath)) {
+      tempFile.delete()
+      promise.reject("E_BUSY", "Use the combined session stop method")
+      return
+    }
     Toast.makeText(
             reactContext,
             "Saved results from Profiler to " + outputPath,

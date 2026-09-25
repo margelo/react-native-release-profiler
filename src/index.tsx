@@ -69,6 +69,9 @@ export interface ProfilingSession {
 
 /** Android 15+ only. Resolution means requested, not that native sampling is ready.
  * System rate limits and asynchronous errors are reported in stop() artifacts.
+ * Enables Hermes and adopts a native recording started by NativeProfiling.start()
+ * without restarting native sampling. Options are ignored when adopting that session.
+ * If no native recording exists, starts both collectors.
  */
 export async function startProfilingSession(
   options: ProfilingSessionOptions = {}

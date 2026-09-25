@@ -17,3 +17,12 @@ and Hermes samples; other platforms use the existing Hermes-only API. Completed
 Android sessions are exported to `Download/release-profiler/<sessionId>/`.
 See the [library README](../README.md#android-native--javascript-sampling) for the
 CLI command to merge the capture with the exact release build's Hermes source map.
+
+To record Android startup, build a release APK with
+`cd example/android && ./gradlew assembleRelease -PprofileStartup=true`.
+This requests native-only sampling before `loadReactNative(this)` in
+`MainApplication`. Launch the app, then tap **Record profile** to start Hermes
+sampling, adopt the native session, and export both after five more seconds.
+Hermes samples begin at the button press, not at app launch. Native sampling has a
+default 30-second duration; tap promptly to capture overlapping native and JS
+activity. Startup profiling is disabled by default.
