@@ -14,16 +14,8 @@ buildscript {
   }
 }
 
-def isNewArchitectureEnabled() {
-  return rootProject.hasProperty("newArchEnabled") && rootProject.getProperty("newArchEnabled") == "true"
-}
-
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
-
-if (isNewArchitectureEnabled()) {
-  apply plugin: "com.facebook.react"
-}
 
 def getExtOrDefault(name) {
   return rootProject.ext.has(name) ? rootProject.ext.get(name) : project.properties["ReleaseProfiler_" + name]
@@ -43,6 +35,9 @@ def supportsNamespace() {
 }
 
 android {
+  if (rootProject.ext.has("ndkVersion")) {
+    ndkVersion rootProject.ext.ndkVersion
+  }
   if (supportsNamespace()) {
     namespace "com.releaseprofiler"
 
@@ -58,7 +53,33 @@ android {
   defaultConfig {
     minSdkVersion getExtOrIntegerDefault("minSdkVersion")
     targetSdkVersion getExtOrIntegerDefault("targetSdkVersion")
+    consumerProguardFiles "consumer-rules.pro"
+    externalNativeBuild {
+      cmake {
+        arguments "-DANDROID_STL=c++_shared"
+      }
+    }
 
+  }
+
+  buildFeatures {
+    prefab true
+  }
+
+  externalNativeBuild {
+    cmake {
+      path "src/main/cpp/CMakeLists.txt"
+      version "3.22.1"
+    }
+  }
+
+  // Imported prefab libraries are supplied by the host React Native/Hermes AARs.
+  // Package only this library's own bridge, avoiding duplicate or mismatched engines.
+  packagingOptions {
+    exclude "**/libjsi.so"
+    exclude "**/libhermes.so"
+    exclude "**/libhermesvm.so"
+    exclude "**/libc++_shared.so"
   }
 
   buildTypes {
@@ -71,9 +92,13 @@ android {
     disable "GradleCompatible"
   }
 
+  kotlinOptions {
+    jvmTarget = "11"
+  }
+
   compileOptions {
-    sourceCompatibility JavaVersion.VERSION_1_8
-    targetCompatibility JavaVersion.VERSION_1_8
+    sourceCompatibility JavaVersion.VERSION_11
+    targetCompatibility JavaVersion.VERSION_11
   }
 }
 
@@ -89,6 +114,16 @@ dependencies {
   // For > 0.71, this will be replaced by `com.facebook.react:react-android:$version` by react gradle plugin
   //noinspection GradleDynamicVersion
   implementation "com.facebook.react:react-native:+"
+  // The React Native Gradle plugin aligns this to the app's Hermes version.
+  implementation "com.facebook.react:hermes-android"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 }
 
+
+// RN chooses Java 11 on older releases and Java 17 on current releases. Keep the
+// Kotlin bytecode target aligned after the host plugin finalizes its Java settings.
+androidComponents.finalizeDsl { extension ->
+  tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    kotlinOptions.jvmTarget = extension.compileOptions.targetCompatibility.toString()
+  }
+}

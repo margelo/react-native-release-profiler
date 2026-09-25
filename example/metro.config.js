@@ -1,45 +1,34 @@
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const path = require('path');
-const escape = require('escape-string-regexp');
-const exclusionList = require('metro-config/src/defaults/exclusionList');
 const pak = require('../package.json');
 
 const root = path.resolve(__dirname, '..');
-const modules = Object.keys({ ...pak.peerDependencies });
+const singletonModules = ['react', 'react-native'];
 
-/**
- * Metro configuration
- * https://facebook.github.io/metro/docs/configuration
- *
- * @type {import('metro-config').MetroConfig}
- */
-const config = {
+module.exports = mergeConfig(getDefaultConfig(__dirname), {
   watchFolders: [root],
-
-  // We need to make sure that only one version is loaded for peerDependencies
-  // So we block them at the root, and alias them to the versions in example's node_modules
   resolver: {
-    blacklistRE: exclusionList(
-      modules.map(
-        (m) =>
-          new RegExp(`^${escape(path.join(root, 'node_modules', m))}\\/.*$`)
-      )
-    ),
-
-    extraNodeModules: modules.reduce((acc, name) => {
-      acc[name] = path.join(__dirname, 'node_modules', name);
-      return acc;
-    }, {}),
+    useWatchman: process.env.RELEASE_PROFILER_NO_WATCHMAN !== '1',
+    // Force library sources outside this workspace to share the app's React runtime.
+    resolveRequest(context, moduleName, platform) {
+      const singleton = singletonModules.find(
+        (name) => moduleName === name || moduleName.startsWith(`${name}/`)
+      );
+      if (singleton) {
+        return context.resolveRequest(
+          { ...context, originModulePath: path.join(__dirname, 'index.js') },
+          moduleName,
+          platform
+        );
+      }
+      if (moduleName === pak.name) {
+        return context.resolveRequest(
+          context,
+          path.join(root, pak.source),
+          platform
+        );
+      }
+      return context.resolveRequest(context, moduleName, platform);
+    },
   },
-
-  transformer: {
-    getTransformOptions: async () => ({
-      transform: {
-        experimentalImportSupport: false,
-        inlineRequires: true,
-      },
-    }),
-  },
-};
-
-module.exports = mergeConfig(getDefaultConfig(__dirname), config);
+});

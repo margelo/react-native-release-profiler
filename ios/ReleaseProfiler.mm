@@ -6,7 +6,7 @@
 #define EXISTS_REACT_NATIVE_VERSION_HEADER
 #include <cxxreact/ReactNativeVersion.h>
 #elif __has_include(<React/ReactNativeVersion.h>)
-#def EXISTS_REACT_NATIVE_VERSION_HEADER
+#define EXISTS_REACT_NATIVE_VERSION_HEADER
 #include <React/ReactNativeVersion.h>
 #endif
 #endif

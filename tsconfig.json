@@ -1,4 +1,5 @@
 {
+  "exclude": ["node_modules", "lib"],
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
@@ -12,7 +13,7 @@
     "jsx": "react",
     "lib": ["esnext", "dom"],
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
     "noImplicitUseStrict": false,

@@ -5,7 +5,6 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
-import com.facebook.hermes.instrumentation.HermesSamplingProfiler
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -27,7 +26,7 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
   // See https://reactnative.dev/docs/native-modules-android
   @ReactMethod(isBlockingSynchronousMethod = true)
   fun startProfiling(): Boolean {
-    HermesSamplingProfiler.enable();
+    HermesProfilerBridge.enable();
     return true
   }
 
@@ -36,8 +35,8 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
     val tempFile = File.createTempFile(
       "sampling-profiler-trace", ".cpuprofile", reactContext.getCacheDir())
     val outputPath =  tempFile.getPath()
-    HermesSamplingProfiler.dumpSampledTraceToFile(outputPath)
-    HermesSamplingProfiler.disable()
+    HermesProfilerBridge.disable()
+    HermesProfilerBridge.dumpSampledTraceToFile(outputPath)
     Toast.makeText(
             reactContext,
             "Saved results from Profiler to " + outputPath,
