@@ -84,6 +84,64 @@ yarn add --dev @react-native-community/cli
 
 ## API
 
+### Android native + JavaScript sampling
+
+On Android 15 (API 35) and newer, record native stacks alongside Hermes with
+`startProfilingSession()`. Build against Android SDK 35 or newer and use a release
+build for representative measurements. No `<profileable android:shell="true" />`
+manifest entry is required for the programmatic API. System-service profiling is
+enabled by default; `<profileable android:enabled="false" />` disables it.
+See the [Android manifest documentation](https://developer.android.com/guide/topics/manifest/profileable-element).
+
+```ts
+import { startProfilingSession } from 'react-native-release-profiler';
+
+const session = await startProfilingSession({
+  durationMs: 30000,
+  samplingFrequencyHz: 100,
+});
+
+// Exercise the app, then stop and export the capture.
+const artifacts = await session.stop(true);
+if (artifacts.nativeStatus !== 'success') {
+  console.warn(artifacts.nativeError); // The Hermes profile is still available.
+}
+```
+
+Only one recording can run at a time. The existing Hermes-only API remains
+available on older Android versions and other supported platforms.
+
+`startProfilingSession()` resolves when sampling is requested, not when native
+sampling begins. Android starts asynchronously, may clamp settings, and applies
+rate limits. `stop()` disables Hermes, requests native cancellation, and waits
+for the native result. Optional `bufferSizeKb` and `resultTimeoutMs` default to
+8192 KB and 120000 ms. Repeated `stop()` calls share the same result.
+
+`stop(true)` exports `session.json`, `hermes.cpuprofile`, and, if available,
+`native.perfetto-trace` into `Download/release-profiler/<sessionId>/`.
+`stop()` without `true` keeps them in app-private storage. Native errors or
+timeouts are reported in the artifacts; a successful Android response does not
+guarantee the trace contains stack samples.
+
+Pull the exported directory and merge it using the **composed Hermes source map
+from the exact installed release build**:
+
+```sh
+adb pull /sdcard/Download/release-profiler/<sessionId> ./capture
+npx react-native-release-profiler --merge-session ./capture/session.json \
+  --sourcemap-path ./android/app/build/generated/sourcemaps/react/release/index.android.bundle.map \
+  --output ./merged.perfetto-trace
+```
+
+Open the result in [Perfetto](https://ui.perfetto.dev/). The CLI preserves native
+trace packets and adds symbolicated Hermes samples on the same timeline.
+Start/stop clock anchors map Hermes' monotonic timestamps to Android's boottime
+clock. Captures with clock changes (such as device suspend), mismatched process
+IDs, missing native samples, or invalid timestamp coverage are rejected.
+Native and JS stacks remain independent samples; they are not joined into one
+call stack or converted into exact function durations.
+
+
 ### `startProfiling(): void`
 
 Synchronously starts the Hermes Profiling Session.

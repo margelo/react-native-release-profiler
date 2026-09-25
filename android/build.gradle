@@ -48,7 +48,8 @@ android {
     }
   }
 
-  compileSdkVersion getExtOrIntegerDefault("compileSdkVersion")
+  // ProfilingManager is a public API from Android 15; minSdk remains unchanged.
+  compileSdkVersion Math.max(35, getExtOrIntegerDefault("compileSdkVersion"))
 
   defaultConfig {
     minSdkVersion getExtOrIntegerDefault("minSdkVersion")

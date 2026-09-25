@@ -8,6 +8,7 @@ import transformer from '@margelo/hermes-profile-transformer';
 import { getMetroBundleOptions } from './getMetroBundleOptions';
 import { generateSourcemap, findSourcemap } from './sourcemapUtils';
 import getConfig from './getConfig';
+import { mergeSession } from './mergeProfiles';
 
 // Most of the file is just a copy of https://github.com/react-native-community/cli/blob/main/packages/cli-hermes/src/profileHermes/downloadProfile.ts
 
@@ -232,21 +233,49 @@ program
   .option('--appIdSuffix <string>')
   .option('--fromDownload')
   .option('--raw')
-  .option('--local <string>');
+  .option('--local <string>')
+  .option(
+    '--merge-session <path>',
+    'Merge an exported session into a Perfetto protobuf trace'
+  )
+  .option('--output <path>', 'Merged Perfetto output', 'merged.perfetto-trace');
 
 program.parse();
 
 const options = program.opts();
 const dstPath = '.';
-downloadProfile(
-  options.local,
-  options.fromDownload,
-  dstPath,
-  options.filename || getFilename(options.local),
-  options.sourcemapPath,
-  options.raw,
-  options.generateSourcemap,
-  options.port,
-  options.appId,
-  options.appIdSuffix
-);
+const task = options.mergeSession
+  ? (async () => {
+      if (!options.sourcemapPath) {
+        throw new Error(
+          '--merge-session requires --sourcemap-path from the exact release build'
+        );
+      }
+      const result = await mergeSession({
+        session: options.mergeSession,
+        sourceMap: options.sourcemapPath,
+        output: options.output,
+      });
+      logger.success(
+        `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${options.output}; ${result.symbolicatedFrames} symbolicated frames`
+      );
+      if (result.unmappedFrames)
+        logger.warn(`${result.unmappedFrames} JS frames could not be mapped`);
+    })()
+  : downloadProfile(
+      options.local,
+      options.fromDownload,
+      dstPath,
+      options.filename || getFilename(options.local),
+      options.sourcemapPath,
+      options.raw,
+      options.generateSourcemap,
+      options.port,
+      options.appId,
+      options.appIdSuffix
+    );
+
+task.catch((error: Error) => {
+  logger.error(error.message);
+  process.exitCode = 1;
+});

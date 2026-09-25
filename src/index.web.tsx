@@ -54,6 +54,19 @@ const SAMPLING_INTERVAL = 10;
 const MAX_BUFFER_SIZE = 10000;
 const MICRO_SECONDS_IN_MILLISECONDS = 1000;
 
+export type {
+  ProfilingSessionOptions,
+  ProfilingSessionArtifacts,
+  ProfilingSession,
+} from './index';
+
+/** Native sampling is only available on Android 15 and newer. */
+export async function startProfilingSession(
+  _options: import('./index').ProfilingSessionOptions = {}
+): Promise<import('./index').ProfilingSession> {
+  throw new Error('Native sampling requires Android 15 (API 35) or newer.');
+}
+
 export function startProfiling(): boolean {
   if (typeof window.Profiler !== 'function') {
     console.warn(

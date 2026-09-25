@@ -9,6 +9,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URL
@@ -17,6 +18,33 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
 
   val reactContext = reactContext
+  private val sessions = ProfilingSessions(reactContext)
+  private var legacyActive = false
+
+  @ReactMethod
+  @Synchronized
+  fun startProfilingSession(options: ReadableMap, promise: Promise) {
+    if (legacyActive) {
+      promise.reject("E_BUSY", "Legacy Hermes profiling is already active")
+      return
+    }
+    sessions.start(options, promise)
+  }
+
+  @ReactMethod
+  fun stopProfilingSession(id: String, saveToDownloads: Boolean, promise: Promise) {
+    sessions.stop(id, saveToDownloads, promise)
+  }
+
+  @Synchronized
+  override fun invalidate() {
+    sessions.detachRuntime()
+    if (legacyActive) {
+      HermesProfilerBridge.disable()
+      legacyActive = false
+    }
+    super.invalidate()
+  }
 
   override fun getName(): String {
     return NAME
@@ -25,18 +53,28 @@ class ReleaseProfilerModule(reactContext: ReactApplicationContext) :
   // Example method
   // See https://reactnative.dev/docs/native-modules-android
   @ReactMethod(isBlockingSynchronousMethod = true)
+  @Synchronized
   fun startProfiling(): Boolean {
+    check(!sessions.isActive()) { "A combined profiling session is already active" }
+    if (legacyActive) return true
     HermesProfilerBridge.enable();
+    legacyActive = true
     return true
   }
 
   @ReactMethod
+  @Synchronized
   fun stopProfiling(saveToDownloads: Boolean, promise: Promise) {
+    if (sessions.isActive()) {
+      promise.reject("E_BUSY", "Use the combined session stop method")
+      return
+    }
     val tempFile = File.createTempFile(
       "sampling-profiler-trace", ".cpuprofile", reactContext.getCacheDir())
     val outputPath =  tempFile.getPath()
     HermesProfilerBridge.disable()
     HermesProfilerBridge.dumpSampledTraceToFile(outputPath)
+    legacyActive = false
     Toast.makeText(
             reactContext,
             "Saved results from Profiler to " + outputPath,

@@ -13781,6 +13781,7 @@ __metadata:
     react-native: 0.87.1
     react-native-builder-bob: ^0.20.0
     release-it: ^15.0.0
+    source-map: ^0.7.3
     turbo: ^1.10.7
     typescript: ^5.9.3
   peerDependencies:

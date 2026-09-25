@@ -1,0 +1,283 @@
+package com.releaseprofiler
+
+import android.annotation.TargetApi
+import android.content.ContentValues
+import android.content.Context
+import android.os.*
+import android.provider.MediaStore
+import com.facebook.react.bridge.*
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.util.UUID
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+
+/** All state is guarded by this instance; no polling or continuous clock synchronization. */
+internal class ProfilingSessions(private val context: Context) {
+  private val handler = Handler(Looper.getMainLooper())
+  // Idle workers expire rather than retaining a thread.
+  private val worker = ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS, LinkedBlockingQueue<Runnable>())
+  private var active: Session? = null
+  private class Session(val id: String, val directory: File, val timeoutMs: Long) {
+    val cancellation = CancellationSignal()
+    val anchors = JSONArray()
+    val boundaries = JSONObject()
+    val requestedOptions = JSONObject()
+    var nativeStatus = "pending"
+    var nativeError: String? = null
+    var nativeErrorCode: Int? = null
+    var nativeFile: File? = null
+    var hermesFile: File? = null
+    var completion: Promise? = null
+    var stopped = false
+    var saveToDownloads = false
+    var timeout: Runnable? = null
+  }
+
+  @Synchronized fun isActive() = active != null
+
+  @Synchronized fun detachRuntime() {
+    val session = active ?: return
+    session.timeout?.let { handler.removeCallbacks(it) }
+    try {
+      try {
+        if (!session.stopped) HermesProfilerBridge.disable()
+      } finally {
+        session.cancellation.cancel()
+      }
+    } finally {
+      val pendingCompletion = session.completion
+      session.completion = null
+      active = null
+      pendingCompletion?.let { callback ->
+        worker.execute { callback.reject("E_DESTROYED", "React runtime was destroyed during profiling") }
+      }
+    }
+  }
+
+  private fun clock(): JSONObject {
+    val before = System.nanoTime()
+    val boot = SystemClock.elapsedRealtimeNanos()
+    val after = System.nanoTime()
+    return JSONObject().put("monotonicNs", (before + (after - before) / 2).toString())
+      .put("boottimeNs", boot.toString()).put("uncertaintyNs", (after - before).toString())
+  }
+
+  private fun positiveInt(options: ReadableMap, key: String, default: Int): Int {
+    if (!options.hasKey(key)) return default
+    val value = options.getDouble(key)
+    require(value.isFinite() && value > 0 && value <= Int.MAX_VALUE && value % 1.0 == 0.0) {
+      "$key must be a positive integer"
+    }
+    return value.toInt()
+  }
+
+  @Synchronized fun start(options: ReadableMap, promise: Promise) {
+    if (Build.VERSION.SDK_INT < 35) {
+      promise.reject("E_UNSUPPORTED", "Native sampling requires Android 15 (API 35) or newer")
+      return
+    }
+    if (active != null) {
+      promise.reject("E_BUSY", "A profiling session is already active")
+      return
+    }
+    try {
+      val duration = positiveInt(options, "durationMs", 30000)
+      val frequency = positiveInt(options, "samplingFrequencyHz", 100)
+      val size = positiveInt(options, "bufferSizeKb", 8192)
+      val timeout = positiveInt(options, "resultTimeoutMs", 120000)
+      val session = prepare(duration, frequency, size, timeout)
+      try {
+        HermesProfilerBridge.enable()
+        promise.resolve(session.id)
+      } catch (error: Throwable) {
+        // Enable can fail partway through initialization; always attempt both cleanups.
+        try { HermesProfilerBridge.disable() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
+        try { session.cancellation.cancel() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
+        active = null
+        promise.reject("E_START", error)
+      }
+    } catch (error: Exception) {
+      promise.reject("E_OPTIONS", error)
+    }
+  }
+
+  private fun prepare(duration: Int, frequency: Int, size: Int, timeout: Int): Session {
+    val id = UUID.randomUUID().toString()
+    val dir = File(context.filesDir, "release-profiler/$id")
+    check(dir.mkdirs()) { "Cannot create profiling session directory" }
+    val session = Session(id, dir, timeout.toLong())
+    session.requestedOptions.put("durationMs", duration).put("samplingFrequencyHz", frequency)
+      .put("bufferSizeKb", size).put("resultTimeoutMs", timeout)
+    active = session
+    val anchor = clock()
+    session.anchors.put(anchor)
+    session.boundaries.put("nativeRequest", anchor)
+    try {
+      requestNative(session, duration, frequency, size)
+    } catch (error: Throwable) {
+      active = null
+      throw error
+    }
+    return session
+  }
+
+  @TargetApi(35)
+  private fun requestNative(session: Session, duration: Int, frequency: Int, size: Int) {
+    val manager = context.getSystemService(ProfilingManager::class.java)
+      ?: throw IllegalStateException("ProfilingManager is unavailable on this device")
+    // Bundle keys mirror AndroidX StackSamplingRequestBuilder. The OS may clamp values.
+    val parameters = Bundle().apply {
+      putInt("KEY_DURATION_MS", duration)
+      putInt("KEY_FREQUENCY_HZ", frequency)
+      putInt("KEY_SIZE_KB", size)
+    }
+    manager.requestProfiling(ProfilingManager.PROFILING_TYPE_STACK_SAMPLING, parameters,
+      session.id, session.cancellation, worker) { result ->
+      synchronized(this) {
+        if (active !== session || session.nativeStatus != "pending") return@synchronized
+        session.boundaries.put("nativeResult", clock())
+        session.nativeErrorCode = result.errorCode
+        val path = result.resultFilePath
+        if (result.errorCode == ProfilingResult.ERROR_NONE && path != null) {
+          try {
+            session.nativeFile = File(session.directory, "native.perfetto-trace")
+            File(path).copyTo(session.nativeFile!!, overwrite = true)
+            session.nativeStatus = "success"
+          } catch (error: Exception) {
+            session.nativeFile = null
+            session.nativeStatus = "error"
+            session.nativeError = error.message
+          }
+        } else {
+          session.nativeStatus = "error"
+          session.nativeError = result.errorMessage ?: "ProfilingManager error ${result.errorCode}"
+        }
+        finish(session)
+      }
+    }
+  }
+
+  fun stop(id: String, saveToDownloads: Boolean, promise: Promise) {
+    worker.execute { stopSession(id, saveToDownloads, promise) }
+  }
+
+  @Synchronized private fun stopSession(id: String, saveToDownloads: Boolean, completion: Promise) {
+    val session = active
+    if (session == null || session.id != id || session.stopped) {
+      worker.execute { completion.reject("E_SESSION", "No matching running profiling session") }
+      return
+    }
+    session.stopped = true
+    session.completion = completion
+    session.saveToDownloads = saveToDownloads
+    try {
+      try {
+        HermesProfilerBridge.disable()
+        val disabled = clock()
+        session.anchors.put(disabled)
+      } finally {
+        session.cancellation.cancel()
+      }
+      val file = File(session.directory, "hermes.cpuprofile")
+      HermesProfilerBridge.dumpSampledTraceToFile(file.path)
+      session.hermesFile = file
+    } catch (error: Throwable) {
+      session.timeout?.let { handler.removeCallbacks(it) }
+      session.completion = null
+      active = null
+      worker.execute { completion.reject("E_STOP", error.message ?: "Failed to stop profiling", error) }
+      return
+    }
+    if (session.nativeStatus == "pending") {
+      val timeout = Runnable { worker.execute {
+        synchronized(this) {
+          if (active === session && session.nativeStatus == "pending") {
+            session.nativeStatus = "timeout"
+            session.nativeError = "Timed out waiting for ProfilingManager results"
+            finish(session)
+          }
+        }
+      } }
+      session.timeout = timeout
+      handler.postDelayed(timeout, session.timeoutMs)
+    }
+    worker.execute { synchronized(this) { finish(session) } }
+  }
+
+  private fun finish(session: Session) {
+    if (active !== session) return
+    val completion = session.completion ?: return
+    if (session.nativeStatus == "pending") return
+    session.completion = null
+    session.timeout?.let { handler.removeCallbacks(it) }
+    val artifacts: WritableMap
+    try {
+      val manifest = JSONObject().put("version", 1).put("sessionId", session.id)
+        .put("pid", Process.myPid()).put("hermesClock", "monotonic")
+        .put("packageName", context.packageName)
+        .put("nativeBackend", "android.os.ProfilingManager.STACK_SAMPLING")
+        .put("androidApiLevel", Build.VERSION.SDK_INT).put("requestedOptions", session.requestedOptions)
+        .put("hermesProfilePath", "hermes.cpuprofile")
+        .put("nativeProfilePath", if (session.nativeFile != null) "native.perfetto-trace" else JSONObject.NULL)
+        .put("nativeStatus", session.nativeStatus)
+        .put("nativeError", session.nativeError ?: JSONObject.NULL)
+        .put("nativeErrorCode", session.nativeErrorCode ?: JSONObject.NULL)
+        .put("clockAnchors", session.anchors).put("boundaries", session.boundaries)
+      val file = File(session.directory, "session.json")
+      file.writeText(manifest.toString(2))
+      val uris = mutableListOf<String>()
+      if (session.saveToDownloads) {
+        for (artifact in listOfNotNull(session.hermesFile, session.nativeFile, file)) {
+          uris.add(exportFile(session.id, artifact))
+        }
+      }
+      artifacts = Arguments.createMap().apply {
+        putString("sessionId", session.id)
+        putString("manifestPath", file.path)
+        putString("hermesProfilePath", session.hermesFile!!.path)
+        putString("nativeProfilePath", session.nativeFile?.path)
+        putString("nativeStatus", session.nativeStatus)
+        putString("nativeError", session.nativeError)
+        putArray("downloadUris", Arguments.createArray().also { array -> uris.forEach { array.pushString(it) } })
+      }
+    } catch (error: Exception) {
+      if (active === session) active = null
+      worker.execute {
+        completion.reject("E_SAVE", "Artifacts remain in ${session.directory.path}: ${error.message}", error)
+      }
+      return
+    } finally {
+      if (active === session) active = null
+    }
+    // Deliver after releasing session ownership and its monitor.
+    worker.execute { completion.resolve(artifacts) }
+  }
+
+  @TargetApi(29)
+  private fun exportFile(id: String, file: File): String {
+    val resolver = context.contentResolver
+    val values = ContentValues().apply {
+      put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+      put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+      put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/release-profiler/$id")
+      put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+      ?: throw IllegalStateException("Cannot create Downloads artifact")
+    try {
+      resolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
+        ?: throw IllegalStateException("Cannot open Downloads artifact")
+      values.clear()
+      values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+      resolver.update(uri, values, null, null)
+      return uri.toString()
+    } catch (error: Exception) {
+      resolver.delete(uri, null, null)
+      throw error
+    }
+  }
+}
+

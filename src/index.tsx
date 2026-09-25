@@ -37,3 +37,59 @@ export async function stopProfiling(
   }
   return await ReleaseProfiler.stopProfiling(saveToDownloads);
 }
+
+export interface ProfilingSessionOptions {
+  /** Requested native recording duration; Android may clamp this value. Default: 30000. */
+  durationMs?: number;
+  /** Requested native CPU samples per second. Default: 100. */
+  samplingFrequencyHz?: number;
+  /** Native trace buffer size. Default: 8192 KB. */
+  bufferSizeKb?: number;
+  /** Maximum wait for native results after stop. Default: 120000 ms. */
+  resultTimeoutMs?: number;
+}
+
+export interface ProfilingSessionArtifacts {
+  sessionId: string;
+  manifestPath: string;
+  hermesProfilePath: string;
+  nativeProfilePath: string | null;
+  nativeStatus: 'success' | 'error' | 'timeout';
+  nativeError: string | null;
+  downloadUris?: string[];
+}
+
+export interface ProfilingSession {
+  sessionId: string;
+  /** Stops Hermes immediately, requests native stop, then waits for native output.
+   * Export to Downloads to retrieve artifacts from a non-debuggable app via ADB.
+   */
+  stop(saveToDownloads?: boolean): Promise<ProfilingSessionArtifacts>;
+}
+
+/** Android 15+ only. Resolution means requested, not that native sampling is ready.
+ * System rate limits and asynchronous errors are reported in stop() artifacts.
+ */
+export async function startProfilingSession(
+  options: ProfilingSessionOptions = {}
+): Promise<ProfilingSession> {
+  if (Platform.OS !== 'android' || Number(Platform.Version) < 35) {
+    throw new Error('Native sampling requires Android 15 (API 35) or newer.');
+  }
+  const sessionId: string = await ReleaseProfiler.startProfilingSession(
+    options
+  );
+  let stopping: Promise<ProfilingSessionArtifacts> | undefined;
+  return {
+    sessionId,
+    stop(saveToDownloads = false) {
+      if (!stopping) {
+        stopping = ReleaseProfiler.stopProfilingSession(
+          sessionId,
+          saveToDownloads
+        ) as Promise<ProfilingSessionArtifacts>;
+      }
+      return stopping;
+    },
+  };
+}
