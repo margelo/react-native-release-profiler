@@ -11,6 +11,7 @@ export async function pullMerge(options: {
   directory: string;
   sourceMap: string;
   output: string;
+  format?: 'perfetto' | 'simpleperf';
 }) {
   const deviceArgs = options.device ? ['-s', options.device] : [];
   let sessionId = options.sessionId;
@@ -66,5 +67,6 @@ export async function pullMerge(options: {
     session: path.join(destination, 'session.json'),
     sourceMap: options.sourceMap,
     output: options.output,
+    format: options.format,
   });
 }

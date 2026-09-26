@@ -223,7 +223,7 @@ function getFilename(path?: string) {
   return res;
 }
 
-const { program } = require('commander');
+const { program, Option } = require('commander');
 
 program
   .option('--filename <string>')
@@ -237,9 +237,17 @@ program
   .option('--local <string>')
   .option(
     '--merge-session <path>',
-    'Merge an exported session into a Perfetto protobuf trace'
+    'Merge an exported native and Hermes profiling session'
   )
-  .option('--output <path>', 'Merged Perfetto output', 'merged.perfetto-trace');
+  .addOption(
+    new Option('--format <format>', 'Merged output format')
+      .choices(['perfetto', 'simpleperf'])
+      .default('simpleperf')
+  )
+  .option(
+    '--output <path>',
+    'Merged output (default: merged.trace; Perfetto: merged.perfetto-trace)'
+  );
 
 program
   .command('pull-merge [session-id]')
@@ -250,10 +258,14 @@ program
   .option('--directory <path>', 'Directory for downloaded sessions', '.')
   .addHelpText(
     'after',
-    '\nRequired: --sourcemap-path <path> from the exact release build.\nOptional: --output <path> (default: merged.perfetto-trace).'
+    '\nRequired: --sourcemap-path <path> from the exact release build.\nOptional: --format simpleperf|perfetto (default: simpleperf), --output <path> (default: merged.trace).'
   )
   .action(async (sessionId: string | undefined, commandOptions: any) => {
     const options = { ...program.opts(), ...commandOptions };
+    options.output ??=
+      options.format === 'simpleperf'
+        ? 'merged.trace'
+        : 'merged.perfetto-trace';
     if (!options.sourcemapPath) {
       throw new Error(
         'pull-merge requires --sourcemap-path from the exact release build'
@@ -265,6 +277,7 @@ program
       directory: options.directory,
       sourceMap: options.sourcemapPath,
       output: options.output,
+      format: options.format,
     });
     logger.success(
       `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${options.output}`
@@ -275,6 +288,8 @@ program
 
 program.action(async () => {
   const options = program.opts();
+  options.output ??=
+    options.format === 'simpleperf' ? 'merged.trace' : 'merged.perfetto-trace';
   const dstPath = '.';
   const task = options.mergeSession
     ? (async () => {
@@ -287,6 +302,7 @@ program.action(async () => {
           session: options.mergeSession,
           sourceMap: options.sourcemapPath,
           output: options.output,
+          format: options.format,
         });
         logger.success(
           `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${options.output}; ${result.symbolicatedFrames} symbolicated frames`

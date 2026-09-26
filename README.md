@@ -178,7 +178,7 @@ installed release build**:
 npx react-native-release-profiler pull-merge \
   --directory ./captures \
   --sourcemap-path ./android/app/build/generated/sourcemaps/react/release/index.android.bundle.map \
-  --output ./merged.perfetto-trace
+  --output ./merged.trace
 ```
 
 Use `--device <adb-serial>` when multiple devices are connected. The originals
@@ -187,11 +187,17 @@ pulls use a unique directory suffix to preserve previous downloads. To select
 an older capture, pass its ID: `pull-merge <sessionId>`. For files already
 on disk, use `--merge-session <path/to/session.json>` instead.
 
-In [Perfetto](https://ui.perfetto.dev/), choose **Open trace file** and select
+The CLI automatically converts the merged samples to Simpleperf format. In
+Android Studio, choose **Profiler → Past Recordings → Import recording** and
+select `merged.trace` to open it as **Callstack Sample**.
+
+To export for Perfetto instead, add `--format perfetto` and omit `--output`
+(or set `--output ./merged.perfetto-trace`). In
+[Perfetto](https://ui.perfetto.dev/), choose **Open trace file** and select
 `merged.perfetto-trace`. Find the app process and its JS thread to compare native
 stacks with the `Hermes wall-clock samples (not CPU time)` sampling session.
 
-The CLI preserves native
+The Perfetto export preserves native
 trace packets and adds symbolicated Hermes samples on the same timeline.
 Start/stop clock anchors map Hermes' monotonic timestamps to Android's boottime
 clock. Captures with clock changes (such as device suspend), mismatched process
@@ -199,6 +205,36 @@ IDs, missing native samples, or invalid timestamp coverage are rejected.
 Native and JS stacks remain independent samples; they are not joined into one
 call stack or converted into exact function durations.
 
+
+### Open a merged sampling profile in Android Studio
+
+Simpleperf is the default output format, so no format flag is needed:
+
+```sh
+npx react-native-release-profiler pull-merge \
+  --sourcemap-path ./android/app/build/generated/sourcemaps/react/release/index.android.bundle.map \
+  --output ./merged.trace
+```
+
+In Android Studio, open **Profiler → Past Recordings → Import recording** and
+select `merged.trace`. Use
+`--merge-session ./captures/<sessionId>/session.json` to convert a session already
+on disk. Without `--output`, the default Simpleperf export uses `merged.trace`;
+`--format perfetto` uses `merged.perfetto-trace`.
+
+This exports sampled stacks, timestamps, and process IDs, including symbolicated
+JS frames. Android Studio shows **JS thread (native sampling)** separately from
+**Hermes profiler**. Native samples retain their real thread IDs; Hermes samples
+use collision-free synthetic track IDs because Studio groups samples by thread.
+The Hermes track label includes the original JS thread ID. These are two views
+of the same runtime thread, not two actual operating-system threads. Native and Hermes samples remain independent stacks;
+they are not stitched together. The report labels native and Hermes wall-clock
+samples as separate event types, with a weight of one per sample. Sampling rates
+and meanings differ, so combined counts and Studio's inferred flame-chart widths
+are not CPU-time measurements. The CPU usage chart is unavailable because no
+CPU utilization data is captured. Non-sampling Perfetto packets are omitted;
+keep the Perfetto export for the full trace. This is the Simpleperf **report**
+format, not a raw `perf.data` recording.
 
 ### `startProfiling(): void`
 

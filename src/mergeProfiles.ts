@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { toSimpleperf } from './simpleperf';
 import path from 'path';
 import { SourceMapConsumer } from 'source-map';
 import {
@@ -331,6 +332,7 @@ export async function mergeSession(options: {
   session: string;
   sourceMap: string;
   output: string;
+  format?: 'perfetto' | 'simpleperf';
 }) {
   const manifest = JSON.parse(
     fs.readFileSync(options.session, 'utf8')
@@ -358,12 +360,16 @@ export async function mergeSession(options: {
     manifest,
     fs.readFileSync(options.sourceMap, 'utf8')
   );
+  const outputTrace =
+    options.format !== 'perfetto'
+      ? toSimpleperf(result.trace, manifest.clockAnchors)
+      : result.trace;
   fs.writeFileSync(
     options.output,
     new Uint8Array(
-      result.trace.buffer,
-      result.trace.byteOffset,
-      result.trace.byteLength
+      outputTrace.buffer,
+      outputTrace.byteOffset,
+      outputTrace.byteLength
     )
   );
   return {
