@@ -95,7 +95,7 @@ export async function downloadProfile(
   appId?: string,
   appIdSuffix?: string
 ) {
-  let ctx = await getConfig();
+  let ctx = local && sourcemapPath ? null : await getConfig();
 
   try {
     const androidProject = ctx?.project.android;
