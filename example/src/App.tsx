@@ -6,11 +6,44 @@ import {
   stopProfiling,
 } from 'react-native-release-profiler';
 
-function sampleWorkload() {
+// Deliberately block JS while recording so each task is visible in sampled stacks.
+function longMathTask() {
+  const deadline = performance.now() + 200;
   let result = 0;
-  for (let index = 0; index < 500000; index++) {
-    result += Math.sqrt(index);
-  }
+  do {
+    for (let index = 1; index <= 10000; index++) {
+      result += Math.sqrt(index) * Math.sin(index);
+    }
+  } while (performance.now() < deadline);
+  return result;
+}
+
+function longSortTask() {
+  const deadline = performance.now() + 300;
+  let result = 0;
+  do {
+    const values = Array.from({ length: 4000 }, (_, index) =>
+      Math.sin(index * 17)
+    );
+    values.sort((a, b) => a - b);
+    result += values[0] ?? 0;
+  } while (performance.now() < deadline);
+  return result;
+}
+
+function longJsonTask() {
+  const payload = JSON.stringify(
+    Array.from({ length: 1000 }, (_, id) => ({
+      id,
+      title: `Profiling item ${id}`,
+      values: [id, id * 2, id * 3],
+    }))
+  );
+  const deadline = performance.now() + 400;
+  let result = 0;
+  do {
+    result += JSON.stringify(JSON.parse(payload)).length;
+  } while (performance.now() < deadline);
   return result;
 }
 
@@ -27,8 +60,13 @@ export default function App() {
           ? await startProfilingSession({ durationMs: 10000 })
           : undefined;
       if (!session) startProfiling();
-      setStatus('Recording for 5 seconds…');
-      workload = setInterval(sampleWorkload, 100);
+      setStatus('Recording math, sorting, and JSON long tasks for 5 seconds…');
+      const tasks = [longMathTask, longSortTask, longJsonTask];
+      let taskIndex = 0;
+      workload = setInterval(() => {
+        tasks[taskIndex % tasks.length]!();
+        taskIndex++;
+      }, 700);
       await new Promise<void>((resolve) => setTimeout(resolve, 5000));
       clearInterval(workload);
       setStatus('Saving profile…');

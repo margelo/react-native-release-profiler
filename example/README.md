@@ -29,3 +29,10 @@ sampling, adopt the native session, and export both after five more seconds.
 Hermes samples begin at the button press, not at app launch. Native sampling has a
 default 30-second duration; tap promptly to capture overlapping native and JS
 activity. Startup profiling is disabled by default.
+
+While recording, the example deliberately runs `longMathTask` (~200 ms),
+`longSortTask` (~300 ms), and `longJsonTask` (~400 ms), rotating every 700 ms.
+These block the JS thread so their names are visible in the symbolicated Hermes
+sampling track, with corresponding engine activity in the native JS-thread
+track. Durations are approximate minimums and can be longer on slow devices.
+Use the composed source map from the rebuilt APK when merging the capture.
