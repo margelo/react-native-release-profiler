@@ -7,10 +7,11 @@ object NativeProfiling {
   private var instance: ProfilingSessions? = null
 
   @Synchronized internal fun sessions(context: Context): ProfilingSessions =
-    instance ?: ProfilingSessions(context.applicationContext).also { instance = it }
+    instance ?: ProfilingSessions(context.applicationContext ?: context).also { instance = it }
 
   /**
-   * Call from Application.onCreate(), before React Native/SoLoader initialization.
+   * Call after super.attachBaseContext(base), or from Application.onCreate(),
+   * before React Native/SoLoader initialization.
    * Only Android sampling starts here. The first JS startProfilingSession() enables
    * Hermes and adopts this native recording; its options are ignored.
    * Stop and export through that JS session using the normal CLI workflow.

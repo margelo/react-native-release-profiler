@@ -49,7 +49,7 @@ async function getSourcemapFromServer(
     }
 
     return data as SourceMap;
-  } catch (e) {
+  } catch {
     console.log(`Failed to fetch source map from "${requestURL}"`);
     return undefined;
   }

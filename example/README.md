@@ -20,8 +20,11 @@ CLI command to merge the capture with the exact release build's Hermes source ma
 
 To record Android startup, build a release APK with
 `cd example/android && ./gradlew assembleRelease -PprofileStartup=true`.
-This requests native-only sampling before `loadReactNative(this)` in
-`MainApplication`. Launch the app, then tap **Record profile** to start Hermes
+This requests native-only sampling immediately after `super.attachBaseContext(base)`
+in `MainApplication`, then sleeps for 100 ms before app initialization continues.
+The pause gives the asynchronous sampler a head start, but cannot guarantee it
+is ready and adds 100 ms to startup measurements. The library itself never sleeps.
+Launch the app, then tap **Record profile** to start Hermes
 sampling, adopt the native session, and export both after five more seconds.
 Hermes samples begin at the button press, not at app launch. Native sampling has a
 default 30-second duration; tap promptly to capture overlapping native and JS

@@ -113,24 +113,25 @@ available on older Android versions and other supported platforms.
 
 #### Capture app startup
 
-Request native sampling from `MainApplication.onCreate()` before initializing
+Request native sampling just after `super.attachBaseContext(base)` before initializing
 React Native. This hook does not load the Hermes profiler bridge or start JS sampling:
 
 ```kotlin
+import android.content.Context
 import android.os.Build
 import com.releaseprofiler.NativeProfiling
 
-override fun onCreate() {
-  super.onCreate()
+override fun attachBaseContext(base: Context) {
+  super.attachBaseContext(base)
   if (Build.VERSION.SDK_INT >= 35 && profilingEnabled) {
     NativeProfiling.start(this)
   }
-  loadReactNative(this) // Keep your existing RN/SoLoader initialization here.
 }
 ```
 
-`profilingEnabled` is your own opt-in. On older React Native versions, keep your
-existing `SoLoader.init(...)` instead of adding `loadReactNative(...)`.
+`profilingEnabled` is your own opt-in. Keep your normal React Native/SoLoader
+initialization in `onCreate()`. You can also request sampling from `onCreate()`
+if the earlier hook is unnecessary.
 
 Call `startProfilingSession()` from JS to enable Hermes sampling and adopt the
 native recording, then `session.stop(true)` to export both. Native sampling is
@@ -142,6 +143,11 @@ execution are not captured by the Hermes sampler. Native sampling may cover
 that earlier work, but Android starts it asynchronously, so the first native
 startup instructions may still be missed. Clock anchors align both recordings
 in the CLI even though they start at different times.
+
+The example startup build sleeps for 100 ms after requesting native sampling to
+give it a head start. This is not a readiness guarantee and adds 100 ms to app
+startup; do not treat those captures as unmodified startup-time measurements.
+The library itself does not sleep.
 
 #### Stop and merge
 
@@ -157,17 +163,35 @@ for the native result. Optional `bufferSizeKb` and `resultTimeoutMs` default to
 timeouts are reported in the artifacts; a successful Android response does not
 guarantee the trace contains stack samples.
 
-Pull the exported directory and merge it using the **composed Hermes source map
-from the exact installed release build**:
+### Pull and merge native and Hermes profiles
+
+Finish the recording with `await session.stop(true)` to export both profiles
+and their synchronization metadata. `pull-merge` automatically selects the
+latest exported session by its `session.json` modification time, keeping native
+and Hermes profiles from the same session together.
+
+Connect the Android device with USB debugging enabled and `adb` available on
+your PATH. Run `pull-merge` with the **composed Hermes source map from the exact
+installed release build**:
 
 ```sh
-adb pull /sdcard/Download/release-profiler/<sessionId> ./capture
-npx react-native-release-profiler --merge-session ./capture/session.json \
+npx react-native-release-profiler pull-merge \
+  --directory ./captures \
   --sourcemap-path ./android/app/build/generated/sourcemaps/react/release/index.android.bundle.map \
   --output ./merged.perfetto-trace
 ```
 
-Open the result in [Perfetto](https://ui.perfetto.dev/). The CLI preserves native
+Use `--device <adb-serial>` when multiple devices are connected. The originals
+are retained in `./captures/<sessionId>/`, including when merging fails. Repeated
+pulls use a unique directory suffix to preserve previous downloads. To select
+an older capture, pass its ID: `pull-merge <sessionId>`. For files already
+on disk, use `--merge-session <path/to/session.json>` instead.
+
+In [Perfetto](https://ui.perfetto.dev/), choose **Open trace file** and select
+`merged.perfetto-trace`. Find the app process and its JS thread to compare native
+stacks with the `Hermes wall-clock samples (not CPU time)` sampling session.
+
+The CLI preserves native
 trace packets and adds symbolicated Hermes samples on the same timeline.
 Start/stop clock anchors map Hermes' monotonic timestamps to Android's boottime
 clock. Captures with clock changes (such as device suspend), mismatched process

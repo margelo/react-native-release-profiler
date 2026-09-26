@@ -9,6 +9,7 @@ import { getMetroBundleOptions } from './getMetroBundleOptions';
 import { generateSourcemap, findSourcemap } from './sourcemapUtils';
 import getConfig from './getConfig';
 import { mergeSession } from './mergeProfiles';
+import { pullMerge } from './pullMerge';
 
 // Most of the file is just a copy of https://github.com/react-native-community/cli/blob/main/packages/cli-hermes/src/profileHermes/downloadProfile.ts
 
@@ -240,42 +241,76 @@ program
   )
   .option('--output <path>', 'Merged Perfetto output', 'merged.perfetto-trace');
 
-program.parse();
-
-const options = program.opts();
-const dstPath = '.';
-const task = options.mergeSession
-  ? (async () => {
-      if (!options.sourcemapPath) {
-        throw new Error(
-          '--merge-session requires --sourcemap-path from the exact release build'
-        );
-      }
-      const result = await mergeSession({
-        session: options.mergeSession,
-        sourceMap: options.sourcemapPath,
-        output: options.output,
-      });
-      logger.success(
-        `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${options.output}; ${result.symbolicatedFrames} symbolicated frames`
+program
+  .command('pull-merge [session-id]')
+  .description(
+    'Pull the latest exported Android session (or a specified ID) and merge native and Hermes samples'
+  )
+  .option('--device <serial>', 'ADB device serial')
+  .option('--directory <path>', 'Directory for downloaded sessions', '.')
+  .addHelpText(
+    'after',
+    '\nRequired: --sourcemap-path <path> from the exact release build.\nOptional: --output <path> (default: merged.perfetto-trace).'
+  )
+  .action(async (sessionId: string | undefined, commandOptions: any) => {
+    const options = { ...program.opts(), ...commandOptions };
+    if (!options.sourcemapPath) {
+      throw new Error(
+        'pull-merge requires --sourcemap-path from the exact release build'
       );
-      if (result.unmappedFrames)
-        logger.warn(`${result.unmappedFrames} JS frames could not be mapped`);
-    })()
-  : downloadProfile(
-      options.local,
-      options.fromDownload,
-      dstPath,
-      options.filename || getFilename(options.local),
-      options.sourcemapPath,
-      options.raw,
-      options.generateSourcemap,
-      options.port,
-      options.appId,
-      options.appIdSuffix
+    }
+    const result = await pullMerge({
+      sessionId,
+      device: options.device,
+      directory: options.directory,
+      sourceMap: options.sourcemapPath,
+      output: options.output,
+    });
+    logger.success(
+      `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${options.output}`
     );
+    if (result.unmappedFrames)
+      logger.warn(`${result.unmappedFrames} JS frames could not be mapped`);
+  });
 
-task.catch((error: Error) => {
+program.action(async () => {
+  const options = program.opts();
+  const dstPath = '.';
+  const task = options.mergeSession
+    ? (async () => {
+        if (!options.sourcemapPath) {
+          throw new Error(
+            '--merge-session requires --sourcemap-path from the exact release build'
+          );
+        }
+        const result = await mergeSession({
+          session: options.mergeSession,
+          sourceMap: options.sourcemapPath,
+          output: options.output,
+        });
+        logger.success(
+          `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${options.output}; ${result.symbolicatedFrames} symbolicated frames`
+        );
+        if (result.unmappedFrames)
+          logger.warn(`${result.unmappedFrames} JS frames could not be mapped`);
+      })()
+    : downloadProfile(
+        options.local,
+        options.fromDownload,
+        dstPath,
+        options.filename || getFilename(options.local),
+        options.sourcemapPath,
+        options.raw,
+        options.generateSourcemap,
+        options.port,
+        options.appId,
+        options.appIdSuffix
+      );
+
+  await task;
+});
+
+program.parseAsync().catch((error: Error) => {
   logger.error(error.message);
   process.exitCode = 1;
 });
