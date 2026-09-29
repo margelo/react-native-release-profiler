@@ -70,7 +70,30 @@ yarn add --dev @react-native-community/cli
         ```
         npx react-native-release-profiler --fromDownload --appId <your appId>
         ```
-    - On **iOS** and **web**:
+    - On a physical **iOS** device (macOS with Xcode's `devicectl`):
+        ```sh
+        xcrun devicectl list devices
+        npx react-native-release-profiler --platform ios --appId <bundle ID> --filename <profile-name.cpuprofile>
+        ```
+        When exactly one paired iOS device is available, the CLI selects it automatically.
+        Connected devices and available devices awaiting a tunnel connection are both
+        eligible; unavailable devices and other Apple platforms are ignored.
+        If multiple devices are available, pass `--device "<device ID or name>"`
+        to choose one. An explicit `--device` skips automatic discovery.
+
+        Use the basename of the path returned by `stopProfiling()` for `--filename`.
+        iOS always saves profiles in the app's `Library/Caches` directory, regardless
+        of `saveInDownloadsDirectory`. The CLI copies that file using
+        `xcrun devicectl device copy from` with the `appDataContainer` domain.
+        The device must be paired and accessible to Xcode, and `devicectl` must
+        permit access to the installed app's data container. Copy errors are
+        reported by `devicectl`; this does not bypass app-container restrictions.
+
+        Add `--raw` to extract the Hermes profile without converting it, or
+        `--sourcemap-path <path>` to use the source map from the profiled iOS build.
+        iOS device downloads require an explicit filename; automatic latest-profile
+        discovery and simulator extraction are not supported.
+    - For an already exported **iOS** profile, or on **web**:
         ```
         npx react-native-release-profiler --local <path to profile>
         ```
