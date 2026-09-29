@@ -111,7 +111,8 @@ export async function downloadProfile(
         )
       : undefined;
   // iOS uses an explicit bundle identifier and does not need Android project config.
-  const ctx = platform === 'ios' ? null : await getConfig();
+  const ctx =
+    platform === 'ios' || (local && sourcemapPath) ? null : await getConfig();
   let temporaryDirectory: string | undefined;
 
   try {
