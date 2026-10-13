@@ -5,6 +5,8 @@ import {
   startProfilingSession,
   stopProfiling,
 } from 'react-native-release-profiler';
+import { runSessionTestSuite } from './sessionTestSuite';
+import { runAccuracyCapture } from './accuracyRun';
 
 // Deliberately block JS while recording so each task is visible in sampled stacks.
 function longMathTask() {
@@ -87,10 +89,59 @@ export default function App() {
     }
   }
 
+  async function runExclusive(task: () => Promise<unknown>) {
+    setRecording(true);
+    try {
+      await task();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRecording(false);
+    }
+  }
+
   return (
     <View style={styles.container}>
       <Text selectable>{status}</Text>
       <Button title="Record profile" disabled={recording} onPress={record} />
+      {Platform.OS === 'android' && Number(Platform.Version) >= 35 ? (
+        <>
+          <Button
+            title="Run session test suite"
+            disabled={recording}
+            onPress={() => runExclusive(() => runSessionTestSuite(setStatus))}
+          />
+          <Button
+            title="Accuracy capture 100 Hz"
+            disabled={recording}
+            onPress={() =>
+              runExclusive(() => runAccuracyCapture(100, setStatus))
+            }
+          />
+          <Button
+            title="Accuracy capture 1000 Hz"
+            disabled={recording}
+            onPress={() =>
+              runExclusive(() => runAccuracyCapture(1000, setStatus))
+            }
+          />
+          <Button
+            title="Legacy profile to Downloads"
+            disabled={recording}
+            onPress={() =>
+              runExclusive(async () => {
+                startProfiling();
+                longMathTask();
+                longSortTask();
+                longJsonTask();
+                const path = await stopProfiling(true);
+                console.log(`[RPLEGACY] ${path}`);
+                setStatus(`Legacy profile: ${path}`);
+              })
+            }
+          />
+        </>
+      ) : null}
     </View>
   );
 }
