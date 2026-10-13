@@ -56,6 +56,8 @@ export interface ProfilingSessionArtifacts {
   nativeProfilePath: string | null;
   nativeStatus: 'success' | 'error' | 'timeout';
   nativeError: string | null;
+  /** android.os.ProfilingResult error code (0 on success), or null on timeout. */
+  nativeErrorCode: number | null;
   downloadUris?: string[];
 }
 

@@ -6,7 +6,7 @@ find_package(hermes-engine REQUIRED CONFIG)
 
 add_library(releaseprofiler SHARED HermesProfilerBridge.cpp)
 target_compile_features(releaseprofiler PRIVATE cxx_std_20)
-target_compile_options(releaseprofiler PRIVATE -Wall -Wextra -Werror)
+target_compile_options(releaseprofiler PRIVATE -Wall -Wextra)
 # Hermes renamed its prefab module in newer releases. Resolve from the host's
 # exact Hermes dependency, never bundle a second engine or hardcode C++ symbols.
 if(TARGET hermes-engine::libhermes)

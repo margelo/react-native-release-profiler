@@ -23,14 +23,15 @@ internal class ProfilingSessions(private val context: Context) {
   private var legacyActive = false
 
   @Synchronized fun startLegacy() {
-    check(active == null) { "A combined profiling session is already active" }
+    // An unadopted startup recording has not enabled Hermes, so it must not block legacy use.
+    check(active?.awaitingAdoption != false) { "A combined profiling session is already active" }
     if (legacyActive) return
     HermesProfilerBridge.enable()
     legacyActive = true
   }
 
   @Synchronized fun stopLegacy(outputPath: String): Boolean {
-    if (active != null) return false
+    if (active?.awaitingAdoption == false) return false
     HermesProfilerBridge.disable()
     HermesProfilerBridge.dumpSampledTraceToFile(outputPath)
     legacyActive = false
@@ -54,22 +55,32 @@ internal class ProfilingSessions(private val context: Context) {
     var timeout: Runnable? = null
   }
 
-  @Synchronized fun isActive() = active != null
+  /** True while a combined session owns the Hermes sampler. */
+  @Synchronized fun isActive() = active?.awaitingAdoption == false
+
+  /** Discards a startup recording that JS has not adopted. */
+  @Synchronized fun cancelPending(): Boolean {
+    val session = active ?: return false
+    if (!session.awaitingAdoption) return false
+    active = null
+    session.cancellation.cancel()
+    session.directory.deleteRecursively()
+    return true
+  }
 
   @Synchronized fun detachRuntime() {
     if (legacyActive) {
-      try { HermesProfilerBridge.disable() } finally { legacyActive = false }
+      runCatching { HermesProfilerBridge.disable() }
+      legacyActive = false
     }
     val session = active ?: return
-    // A runtime owns a startup session only after JS explicitly adopts it.
-    if (session.awaitingAdoption) return
+    // A runtime owns a startup session only after JS explicitly adopts it. A stopped
+    // session has already dumped Hermes; let it finish exporting instead of discarding it.
+    if (session.awaitingAdoption || session.stopped) return
     session.timeout?.let { handler.removeCallbacks(it) }
     try {
-      try {
-        if (!session.stopped) HermesProfilerBridge.disable()
-      } finally {
-        session.cancellation.cancel()
-      }
+      runCatching { HermesProfilerBridge.disable() }
+      session.cancellation.cancel()
     } finally {
       val pendingCompletion = session.completion
       session.completion = null
@@ -90,6 +101,7 @@ internal class ProfilingSessions(private val context: Context) {
 
   private fun positiveInt(options: ReadableMap, key: String, default: Int): Int {
     if (!options.hasKey(key)) return default
+    require(options.getType(key) == ReadableType.Number) { "$key must be a positive integer" }
     val value = options.getDouble(key)
     require(value.isFinite() && value > 0 && value <= Int.MAX_VALUE && value % 1.0 == 0.0) {
       "$key must be a positive integer"
@@ -182,32 +194,33 @@ internal class ProfilingSessions(private val context: Context) {
       requestNative(session, duration, frequency, size)
     } catch (error: Throwable) {
       active = null
+      dir.deleteRecursively()
       throw error
     }
     return session
   }
 
-  @TargetApi(35)
   private fun requestNative(session: Session, duration: Int, frequency: Int, size: Int) {
-    val manager = context.getSystemService(ProfilingManager::class.java)
-      ?: throw IllegalStateException("ProfilingManager is unavailable on this device")
-    // Bundle keys mirror AndroidX StackSamplingRequestBuilder. The OS may clamp values.
-    val parameters = Bundle().apply {
-      putInt("KEY_DURATION_MS", duration)
-      putInt("KEY_FREQUENCY_HZ", frequency)
-      putInt("KEY_SIZE_KB", size)
-    }
-    manager.requestProfiling(ProfilingManager.PROFILING_TYPE_STACK_SAMPLING, parameters,
-      session.id, session.cancellation, worker) { result ->
+    check(Build.VERSION.SDK_INT >= 35) { "Native sampling requires Android 15 (API 35) or newer" }
+    NativeSampler.request(context, session.id, session.cancellation, worker, duration, frequency, size) {
+      code, error, path ->
       synchronized(this) {
-        if (active !== session || session.nativeStatus != "pending") return@synchronized
+        if (active !== session || session.nativeStatus != "pending") {
+          path?.let { File(it).delete() }
+          return@synchronized
+        }
         session.boundaries.put("nativeResult", clock())
-        session.nativeErrorCode = result.errorCode
-        val path = result.resultFilePath
-        if (result.errorCode == ProfilingResult.ERROR_NONE && path != null) {
+        session.nativeErrorCode = code
+        if (path != null) {
           try {
-            session.nativeFile = File(session.directory, "native.perfetto-trace")
-            File(path).copyTo(session.nativeFile!!, overwrite = true)
+            val target = File(session.directory, "native.perfetto-trace")
+            val source = File(path)
+            // ProfilingManager writes into this app's files dir; don't keep a second copy.
+            if (!source.renameTo(target)) {
+              source.copyTo(target, overwrite = true)
+              source.delete()
+            }
+            session.nativeFile = target
             session.nativeStatus = "success"
           } catch (error: Exception) {
             session.nativeFile = null
@@ -216,7 +229,7 @@ internal class ProfilingSessions(private val context: Context) {
           }
         } else {
           session.nativeStatus = "error"
-          session.nativeError = result.errorMessage ?: "ProfilingManager error ${result.errorCode}"
+          session.nativeError = error
         }
         finish(session)
       }
@@ -304,6 +317,7 @@ internal class ProfilingSessions(private val context: Context) {
         putString("nativeProfilePath", session.nativeFile?.path)
         putString("nativeStatus", session.nativeStatus)
         putString("nativeError", session.nativeError)
+        session.nativeErrorCode?.let { putInt("nativeErrorCode", it) } ?: putNull("nativeErrorCode")
         putArray("downloadUris", Arguments.createArray().also { array -> uris.forEach { array.pushString(it) } })
       }
     } catch (error: Exception) {
