@@ -163,6 +163,31 @@ for the native result. Optional `bufferSizeKb` and `resultTimeoutMs` default to
 timeouts are reported in the artifacts; a successful Android response does not
 guarantee the trace contains stack samples.
 
+To discard a startup recording that JS will not adopt, call
+`NativeProfiling.cancel(context)`.
+
+#### Limits and caveats
+
+- **Rate limits.** Android 15 limits stack sampling per app: after one capture,
+  further requests can fail for a while with `nativeStatus: "error"` and
+  `ERROR_FAILED_RATE_LIMIT_PROCESS (2)`. The Hermes profile is still exported.
+  For local testing, disable the limiter on the device (and re-enable it with
+  `device_config delete profiling_testing rate_limiter.disabled`):
+
+  ```sh
+  adb shell device_config put profiling_testing rate_limiter.disabled true
+  ```
+
+- **Clamped frequency.** Android may lower `samplingFrequencyHz` (for example,
+  1000 Hz runs at 200 Hz) and the kernel can drop records at high rates. The CLI
+  prints the effective native frequency and any lost records. Hermes samples at
+  its own fixed rate (~100 Hz) regardless of this option.
+- **Inlined functions.** Hermes may inline small functions into their caller;
+  their time then appears under the caller in the Hermes track.
+- **Native symbols.** Release builds ship stripped `.so` files, so frames inside
+  `libhermesvm.so` and other app libraries are unnamed unless you symbolize the
+  trace with the unstripped libraries from your build.
+
 ### Pull and merge native and Hermes profiles
 
 Finish the recording with `await session.stop(true)` to export both profiles
