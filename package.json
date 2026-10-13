@@ -176,6 +176,6 @@
   "dependencies": {
     "@margelo/hermes-profile-transformer": "^0.0.10",
     "commander": "^11.1.0",
-    "source-map": "^0.7.3"
+    "source-map": "^0.7.4"
   }
 }

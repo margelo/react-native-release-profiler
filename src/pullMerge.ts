@@ -53,16 +53,24 @@ export async function pullMerge(options: {
     fs.mkdirSync(destination);
   }
   logger.info(`Pulling session ${sessionId} into ${destination}`);
-  execFileSync(
-    'adb',
-    [
-      ...deviceArgs,
-      'pull',
-      `/sdcard/Download/release-profiler/${sessionId}/.`,
-      destination,
-    ],
-    { stdio: 'inherit' }
-  );
+  try {
+    execFileSync(
+      'adb',
+      [
+        ...deviceArgs,
+        'pull',
+        `/sdcard/Download/release-profiler/${sessionId}/.`,
+        destination,
+      ],
+      { stdio: 'inherit' }
+    );
+  } catch (error) {
+    // Don't leave an empty download directory behind; keep any partially pulled files.
+    try {
+      fs.rmdirSync(destination);
+    } catch {}
+    throw error;
+  }
   return mergeSession({
     session: path.join(destination, 'session.json'),
     sourceMap: options.sourceMap,

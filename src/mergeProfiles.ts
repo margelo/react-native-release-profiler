@@ -24,8 +24,14 @@ export interface ProfileSessionManifest {
   hermesProfilePath: string;
   nativeProfilePath: string | null;
   nativeStatus: string;
+  nativeError?: string | null;
   clockAnchors: ClockAnchor[];
-  boundaries?: { nativeRequest?: ClockAnchor; nativeResult?: ClockAnchor };
+  boundaries?: {
+    nativeRequest?: ClockAnchor;
+    hermesStart?: ClockAnchor;
+    nativeResult?: ClockAnchor;
+  };
+  requestedOptions?: { samplingFrequencyHz?: number };
 }
 interface Frame {
   name: string;
@@ -106,6 +112,33 @@ export function createClockMapper(
 /** Append separately identified JS sample packets, not synthetic joined native/JS stacks.
  * This preserves samples (including irregular sampling intervals), not inferred execution durations.
  */
+/** A map from another build still "resolves" frames, just to the wrong code. Hermes composed
+ * maps list every function's bytecode start offset; sampled functions must start at one of them.
+ */
+export function assertSourceMapMatchesProfile(
+  map: { x_hermes_function_offsets?: Record<string, number[]> },
+  profile: HermesProfile
+) {
+  const offsets = Object.values(map.x_hermes_function_offsets ?? {}).flat();
+  if (!offsets.length) return;
+  const known = new Set(offsets.map(Number));
+  // Offset 0 is the global function; the Metro prelude (polyfills) between it and the
+  // next listed function is not listed, so only check functions after that point.
+  const first = Math.min(...[...known].filter((offset) => offset > 0));
+  const sampled = new Set(
+    Object.values(profile.stackFrames)
+      .filter((frame) => frame.funcVirtAddr !== undefined)
+      .map((frame) => Number(frame.funcVirtAddr))
+      .filter((address) => address >= first)
+  );
+  const matched = [...sampled].filter((address) => known.has(address)).length;
+  if (sampled.size && matched < sampled.size * 0.8) {
+    throw new Error(
+      `Source map does not match the profiled build: only ${matched} of ${sampled.size} sampled Hermes functions start at an offset listed in the map. Use the composed source map from the exact installed release build.`
+    );
+  }
+}
+
 export async function mergeProfileBuffers(
   nativeTrace: Buffer,
   profile: HermesProfile,
@@ -117,6 +150,9 @@ export async function mergeProfileBuffers(
   nativeSamples: number;
   symbolicatedFrames: number;
   unmappedFrames: number;
+  nativeFrequencyHz?: number;
+  nativeRecordsLost: number;
+  overlappingNativeSamples: number;
 }> {
   if (
     manifest.version !== 1 ||
@@ -134,8 +170,14 @@ export async function mergeProfileBuffers(
   ) {
     throw new Error('Hermes profile has no samples or stack frames');
   }
-  const { sequence, samplePids, stackSampleCounts, sampleTimes } =
-    inspectNativeTrace(nativeTrace);
+  const {
+    sequence,
+    samplePids,
+    stackSampleCounts,
+    sampleTimes,
+    samplingFrequencyHz,
+    kernelRecordsLost,
+  } = inspectNativeTrace(nativeTrace);
   if (samplePids.size && !samplePids.has(pid)) {
     throw new Error(
       'Native sample PIDs do not match the session; wrong native trace'
@@ -189,6 +231,14 @@ export async function mergeProfileBuffers(
       'Native samples do not overlap session clock anchors; wrong native trace for this session'
     );
   }
+  // An adopted startup recording may end before JS sampling starts. That is valid, but
+  // the two tracks then never overlap, so report it instead of implying they do.
+  const hermesStart = manifest.boundaries?.hermesStart
+    ? integer(manifest.boundaries.hermesStart.boottimeNs, 'hermesStart')
+    : first.boot;
+  const overlappingNativeSamples = nativeTimes.filter(
+    (ts) => ts >= hermesStart && ts <= last.boot
+  ).length;
   const interned: Buffer[] = [];
   const frameIds = new Map<string, number>();
   let symbolicatedFrames = 0;
@@ -202,12 +252,18 @@ export async function mergeProfileBuffers(
     bytes(17, message(uint(1, 2), bytes(2, '[Hermes native and metadata]')))
   );
   interned.push(bytes(19, message(uint(1, 2), uint(7, 2))));
-  const consumer = await new SourceMapConsumer(JSON.parse(sourceMap));
+  const rawSourceMap = JSON.parse(sourceMap);
+  assertSourceMapMatchesProfile(rawSourceMap, profile);
+  const consumer = await new SourceMapConsumer(rawSourceMap);
   try {
     for (const [key, frame] of Object.entries(profile.stackFrames)) {
       const id = frameIds.size + 1;
       frameIds.set(key, id);
-      let name = frame.name || '(anonymous)';
+      // Debug (source) profiles embed "(bundleURL:line:col)" in the name; the mapped
+      // original location replaces it below.
+      let name =
+        frame.name?.replace(/\(?[a-z]+:\/\/[^\s]*:\d+:\d+\)?$/i, '') ||
+        '(anonymous)';
       const isJavaScript =
         frame.category === 'JavaScript' || frame.category === undefined;
       let line = Number(frame.line);
@@ -325,6 +381,9 @@ export async function mergeProfileBuffers(
     nativeSamples,
     symbolicatedFrames,
     unmappedFrames,
+    nativeFrequencyHz: samplingFrequencyHz,
+    nativeRecordsLost: kernelRecordsLost,
+    overlappingNativeSamples,
   };
 }
 
@@ -340,7 +399,9 @@ export async function mergeSession(options: {
   const resolveArtifact = (artifact: string | null) => {
     if (!artifact)
       throw new Error(
-        'Native capture did not produce a profile; inspect nativeStatus/nativeError in the manifest'
+        `Native capture did not produce a profile (nativeStatus: ${manifest.nativeStatus}` +
+          (manifest.nativeError ? `, ${manifest.nativeError}` : '') +
+          ')'
       );
     // Exported sessions live together. Device absolute paths are resolved by basename locally.
     return path.resolve(path.dirname(options.session), path.basename(artifact));
@@ -364,6 +425,7 @@ export async function mergeSession(options: {
     options.format !== 'perfetto'
       ? toSimpleperf(result.trace, manifest.clockAnchors)
       : result.trace;
+  fs.mkdirSync(path.dirname(path.resolve(options.output)), { recursive: true });
   fs.writeFileSync(
     options.output,
     new Uint8Array(
@@ -377,5 +439,9 @@ export async function mergeSession(options: {
     nativeSamples: result.nativeSamples,
     symbolicatedFrames: result.symbolicatedFrames,
     unmappedFrames: result.unmappedFrames,
+    requestedFrequencyHz: manifest.requestedOptions?.samplingFrequencyHz,
+    nativeFrequencyHz: result.nativeFrequencyHz,
+    nativeRecordsLost: result.nativeRecordsLost,
+    overlappingNativeSamples: result.overlappingNativeSamples,
   };
 }
