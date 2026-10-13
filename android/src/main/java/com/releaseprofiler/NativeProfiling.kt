@@ -29,4 +29,11 @@ object NativeProfiling {
   ): String = sessions(context).startSession(
     durationMs, samplingFrequencyHz, bufferSizeKb, resultTimeoutMs, true
   )
+
+  /**
+   * Discards a startup recording that JS has not adopted, e.g. when the app decides not
+   * to profile this launch. Returns false when there is no such recording.
+   */
+  @JvmStatic
+  fun cancel(context: Context): Boolean = sessions(context).cancelPending()
 }
