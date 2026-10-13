@@ -223,9 +223,39 @@ function getFilename(path?: string) {
   return res;
 }
 
+/** Report what was actually captured, not only what was requested. */
+function reportMerge(
+  result: Awaited<ReturnType<typeof mergeSession>>,
+  output: string
+) {
+  logger.success(
+    `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${output}; ${result.symbolicatedFrames} symbolicated frames`
+  );
+  if (result.nativeFrequencyHz !== undefined) {
+    const requested = result.requestedFrequencyHz;
+    if (requested !== undefined && requested !== result.nativeFrequencyHz)
+      logger.warn(
+        `Android clamped native sampling to ${result.nativeFrequencyHz} Hz (requested ${requested} Hz)`
+      );
+    else logger.info(`Native sampling ran at ${result.nativeFrequencyHz} Hz`);
+  }
+  if (!result.overlappingNativeSamples)
+    logger.warn(
+      'No native samples overlap the JS samples: native sampling ended before JS sampling started (e.g. a startup recording adopted late)'
+    );
+  if (result.nativeRecordsLost)
+    logger.warn(
+      `${result.nativeRecordsLost} native sample records were lost by the kernel buffer; native counts are a lower bound`
+    );
+  if (result.unmappedFrames)
+    logger.warn(`${result.unmappedFrames} JS frames could not be mapped`);
+}
+
 const { program, Option } = require('commander');
 
 program
+  // Reject typos such as `pul-merge` instead of running the legacy download flow.
+  .allowExcessArguments(false)
   .option('--filename <string>')
   .option('--sourcemap-path <string>')
   .option('--generate-sourcemap')
@@ -279,11 +309,7 @@ program
       output: options.output,
       format: options.format,
     });
-    logger.success(
-      `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${options.output}`
-    );
-    if (result.unmappedFrames)
-      logger.warn(`${result.unmappedFrames} JS frames could not be mapped`);
+    reportMerge(result, options.output);
   });
 
 program.action(async () => {
@@ -304,11 +330,7 @@ program.action(async () => {
           output: options.output,
           format: options.format,
         });
-        logger.success(
-          `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${options.output}; ${result.symbolicatedFrames} symbolicated frames`
-        );
-        if (result.unmappedFrames)
-          logger.warn(`${result.unmappedFrames} JS frames could not be mapped`);
+        reportMerge(result, options.output);
       })()
     : downloadProfile(
         options.local,

@@ -93,8 +93,34 @@ export function inspectNativeTrace(trace: Buffer): {
   samplePids: Set<number>;
   stackSampleCounts: Map<number, number>;
   sampleTimes: { pid: number; timestamp: bigint; clockId: number }[];
+  /** Effective perf sampling frequency from the trace config (Android may clamp requests). */
+  samplingFrequencyHz?: number;
+  /** PerfSample.kernel_records_lost: samples dropped by the kernel ring buffer. */
+  kernelRecordsLost: number;
 } {
   let max = 0;
+  let samplingFrequencyHz: number | undefined;
+  let kernelRecordsLost = 0;
+  // TraceConfig.data_sources[].config.perf_event_config.timebase.frequency
+  const readFrequency = (config: Buffer) => {
+    const nested = (data: Buffer, id: number) =>
+      [...fields(data)]
+        .filter((item) => item.id === id && Buffer.isBuffer(item.value))
+        .map((item) => item.value as Buffer);
+    for (const source of nested(config, 2)) {
+      for (const sourceConfig of nested(source, 1)) {
+        for (const perf of nested(sourceConfig, 111)) {
+          for (const timebase of nested(perf, 15)) {
+            const frequency = [...fields(timebase)].find(
+              (item) => item.id === 2
+            )?.value;
+            if (typeof frequency === 'bigint')
+              samplingFrequencyHz = Number(frequency);
+          }
+        }
+      }
+    }
+  };
   let count = 0;
   const samplePids = new Set<number>();
   const sampleTimes: { pid: number; timestamp: bigint; clockId: number }[] = [];
@@ -145,10 +171,15 @@ export function inspectNativeTrace(trace: Buffer): {
             );
           }
         }
+        if (nested.id === 33 && Buffer.isBuffer(nested.value)) {
+          readFrequency(nested.value);
+        }
         if (nested.id === 66 && Buffer.isBuffer(nested.value)) {
           let pid = 0;
           let hasStack = false;
           for (const sample of fields(nested.value)) {
+            if (sample.id === 17 && typeof sample.value === 'bigint')
+              kernelRecordsLost += Number(sample.value);
             if (sample.id === 2 && typeof sample.value === 'bigint')
               pid = Number(sample.value);
             if (
@@ -177,5 +208,12 @@ export function inspectNativeTrace(trace: Buffer): {
   inspect(trace, 0);
   if (!count || max >= 0xffffffff)
     throw new Error('Invalid native Perfetto trace');
-  return { sequence: max + 1, samplePids, stackSampleCounts, sampleTimes };
+  return {
+    sequence: max + 1,
+    samplePids,
+    stackSampleCounts,
+    sampleTimes,
+    samplingFrequencyHz,
+    kernelRecordsLost,
+  };
 }
