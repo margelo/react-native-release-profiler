@@ -261,6 +261,36 @@ CPU utilization data is captured. Non-sampling Perfetto packets are omitted;
 keep the Perfetto export for the full trace. This is the Simpleperf **report**
 format, not a raw `perf.data` recording.
 
+### Analyze with AI agents and scripts
+
+The CLI can summarize a capture instead of opening it in a GUI. Every command accepts
+`--json` and then prints exactly one JSON object (`{"ok": true, "result": …}` or
+`{"ok": false, "error": {"code": "E_…", "message": …}}`).
+
+```sh
+# Environment check: device, Android version, rate limiter, sessions, source map match
+npx react-native-release-profiler doctor --appId com.example --sourcemap-path <map>
+
+# Hotspots with source lines, long JS tasks, native breakdown, capture-quality warnings
+npx react-native-release-profiler analyze --pull --appId com.example \
+  --sourcemap-path <map> --output before.json
+
+# After a fix: same scenario, new build and map, then compare (marks sampling noise)
+npx react-native-release-profiler analyze --pull --appId com.example \
+  --sourcemap-path <new map> --output after.json
+npx react-native-release-profiler compare before.json after.json
+```
+
+`analyze` also accepts a session directory or `--profile <file.cpuprofile>` for JS-only
+captures, and `pull-merge --format folded` writes collapsed stacks for grep or flame graphs.
+
+An agent skill describing the full profile → fix → verify workflow ships with the package.
+Copy it into your agent's skills directory, for example:
+
+```sh
+npx react-native-release-profiler install-skill .claude/skills
+```
+
 ### `startProfiling(): void`
 
 Synchronously starts the Hermes Profiling Session.

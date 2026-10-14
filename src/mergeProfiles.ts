@@ -1,7 +1,10 @@
 import fs from 'fs';
 import { toSimpleperf } from './simpleperf';
 import path from 'path';
-import { SourceMapConsumer } from 'source-map';
+import { ProfilerError } from './errors';
+import { toFolded } from './folded';
+import { symbolicateFrames } from './symbolicate';
+import { decodeStackSamples } from './traceSamples';
 import {
   bytes,
   concat,
@@ -16,8 +19,12 @@ export interface ClockAnchor {
   boottimeNs: string;
   uncertaintyNs?: string;
 }
+export { assertSourceMapMatchesProfile } from './symbolicate';
+
 export interface ProfileSessionManifest {
   version: 1;
+  packageName?: string;
+  androidApiLevel?: number;
   sessionId: string;
   pid: number;
   hermesClock: 'monotonic';
@@ -31,7 +38,7 @@ export interface ProfileSessionManifest {
     hermesStart?: ClockAnchor;
     nativeResult?: ClockAnchor;
   };
-  requestedOptions?: { samplingFrequencyHz?: number };
+  requestedOptions?: { samplingFrequencyHz?: number; durationMs?: number };
 }
 interface Frame {
   name: string;
@@ -41,6 +48,9 @@ interface Frame {
   column?: string | number;
   funcVirtAddr?: string | number;
   offset?: string | number;
+  /** Debug (source) profiles: where the function starts in the bundle. */
+  funcLine?: string | number;
+  funcColumn?: string | number;
 }
 interface Sample {
   ts: string | number;
@@ -58,7 +68,8 @@ function integer(value: unknown, label: string): bigint {
     (typeof value !== 'string' || !/^\d+$/.test(value)) &&
     (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
   ) {
-    throw new Error(
+    throw new ProfilerError(
+      'E_SESSION_MANIFEST',
       `${label} must be a nonnegative integer (use strings for nanoseconds)`
     );
   }
@@ -73,7 +84,10 @@ export function createClockMapper(
   anchors: ClockAnchor[]
 ): (us: string | number) => bigint {
   if (!Array.isArray(anchors) || anchors.length < 2) {
-    throw new Error('At least start and stop clock anchors are required');
+    throw new ProfilerError(
+      'E_CLOCK',
+      'At least start and stop clock anchors are required'
+    );
   }
   const clocks = anchors
     .map((a) => ({
@@ -87,12 +101,16 @@ export function createClockMapper(
   const offset = first.boot - first.mono;
   for (const clock of clocks) {
     if (clock.uncertainty > 1000000n)
-      throw new Error('Clock calibration uncertainty exceeds 1 ms');
+      throw new ProfilerError(
+        'E_CLOCK',
+        'Clock calibration uncertainty exceeds 1 ms'
+      );
     if (
       abs(clock.boot - clock.mono - offset) >
       first.uncertainty + clock.uncertainty + 100000n
     ) {
-      throw new Error(
+      throw new ProfilerError(
+        'E_CLOCK',
         'Device suspended or clocks changed during capture; cannot synchronize accurately'
       );
     }
@@ -101,7 +119,8 @@ export function createClockMapper(
     const ns = integer(us, 'Hermes timestamp') * 1000n;
     // Clock anchors bracket enable/disable; allow quantization and scheduling tolerance.
     if (ns < first.mono - 1000000n || ns > last.mono + 1000000n) {
-      throw new Error(
+      throw new ProfilerError(
+        'E_CLOCK',
         'Hermes samples fall outside session clock anchors; wrong profile or clock domain'
       );
     }
@@ -112,33 +131,6 @@ export function createClockMapper(
 /** Append separately identified JS sample packets, not synthetic joined native/JS stacks.
  * This preserves samples (including irregular sampling intervals), not inferred execution durations.
  */
-/** A map from another build still "resolves" frames, just to the wrong code. Hermes composed
- * maps list every function's bytecode start offset; sampled functions must start at one of them.
- */
-export function assertSourceMapMatchesProfile(
-  map: { x_hermes_function_offsets?: Record<string, number[]> },
-  profile: HermesProfile
-) {
-  const offsets = Object.values(map.x_hermes_function_offsets ?? {}).flat();
-  if (!offsets.length) return;
-  const known = new Set(offsets.map(Number));
-  // Offset 0 is the global function; the Metro prelude (polyfills) between it and the
-  // next listed function is not listed, so only check functions after that point.
-  const first = Math.min(...[...known].filter((offset) => offset > 0));
-  const sampled = new Set(
-    Object.values(profile.stackFrames)
-      .filter((frame) => frame.funcVirtAddr !== undefined)
-      .map((frame) => Number(frame.funcVirtAddr))
-      .filter((address) => address >= first)
-  );
-  const matched = [...sampled].filter((address) => known.has(address)).length;
-  if (sampled.size && matched < sampled.size * 0.8) {
-    throw new Error(
-      `Source map does not match the profiled build: only ${matched} of ${sampled.size} sampled Hermes functions start at an offset listed in the map. Use the composed source map from the exact installed release build.`
-    );
-  }
-}
-
 export async function mergeProfileBuffers(
   nativeTrace: Buffer,
   profile: HermesProfile,
@@ -159,16 +151,23 @@ export async function mergeProfileBuffers(
     manifest.hermesClock !== 'monotonic' ||
     !manifest.sessionId
   ) {
-    throw new Error('Unsupported session manifest version or Hermes clock');
+    throw new ProfilerError(
+      'E_SESSION_MANIFEST',
+      'Unsupported session manifest version or Hermes clock'
+    );
   }
   const pid = Number(integer(manifest.pid, 'pid'));
-  if (pid <= 0 || pid > 0x7fffffff) throw new Error('Invalid session pid');
+  if (pid <= 0 || pid > 0x7fffffff)
+    throw new ProfilerError('E_SESSION_MANIFEST', 'Invalid session pid');
   if (
     !profile.stackFrames ||
     !Array.isArray(profile.samples) ||
     !profile.samples.length
   ) {
-    throw new Error('Hermes profile has no samples or stack frames');
+    throw new ProfilerError(
+      'E_HERMES_PROFILE',
+      'Hermes profile has no samples or stack frames'
+    );
   }
   const {
     sequence,
@@ -179,13 +178,15 @@ export async function mergeProfileBuffers(
     kernelRecordsLost,
   } = inspectNativeTrace(nativeTrace);
   if (samplePids.size && !samplePids.has(pid)) {
-    throw new Error(
+    throw new ProfilerError(
+      'E_WRONG_NATIVE_TRACE',
       'Native sample PIDs do not match the session; wrong native trace'
     );
   }
   const nativeSamples = stackSampleCounts.get(pid) ?? 0;
   if (!nativeSamples) {
-    throw new Error(
+    throw new ProfilerError(
+      'E_NO_NATIVE_SAMPLES',
       'Native trace contains no stack samples for this app. ProfilingManager may return success after sampling failed or Android removed sample payloads during redaction; this capture cannot be merged.'
     );
   }
@@ -206,7 +207,8 @@ export async function mergeProfileBuffers(
       if (sample.clockId === 6) return sample.timestamp;
       if (sample.clockId === 3)
         return sample.timestamp + first.boot - first.mono;
-      throw new Error(
+      throw new ProfilerError(
+        'E_TRACE_FORMAT',
         `Unsupported native sample clock ${sample.clockId}; cannot verify session time coverage`
       );
     });
@@ -227,7 +229,8 @@ export async function mergeProfileBuffers(
       (ts) => ts >= captureStart - tolerance && ts <= captureEnd + tolerance
     )
   ) {
-    throw new Error(
+    throw new ProfilerError(
+      'E_WRONG_NATIVE_TRACE',
       'Native samples do not overlap session clock anchors; wrong native trace for this session'
     );
   }
@@ -241,8 +244,6 @@ export async function mergeProfileBuffers(
   ).length;
   const interned: Buffer[] = [];
   const frameIds = new Map<string, number>();
-  let symbolicatedFrames = 0;
-  let unmappedFrames = 0;
   // A dedicated mapping identifies JS frames without inventing native addresses.
   interned.push(
     bytes(17, message(uint(1, 1), bytes(2, '[Hermes JavaScript]')))
@@ -252,67 +253,24 @@ export async function mergeProfileBuffers(
     bytes(17, message(uint(1, 2), bytes(2, '[Hermes native and metadata]')))
   );
   interned.push(bytes(19, message(uint(1, 2), uint(7, 2))));
-  const rawSourceMap = JSON.parse(sourceMap);
-  assertSourceMapMatchesProfile(rawSourceMap, profile);
-  const consumer = await new SourceMapConsumer(rawSourceMap);
-  try {
-    for (const [key, frame] of Object.entries(profile.stackFrames)) {
-      const id = frameIds.size + 1;
-      frameIds.set(key, id);
-      // Debug (source) profiles embed "(bundleURL:line:col)" in the name; the mapped
-      // original location replaces it below.
-      let name =
-        frame.name?.replace(/\(?[a-z]+:\/\/[^\s]*:\d+:\d+\)?$/i, '') ||
-        '(anonymous)';
-      const isJavaScript =
-        frame.category === 'JavaScript' || frame.category === undefined;
-      let line = Number(frame.line);
-      let column = Number(frame.column) - 1;
-      if (frame.funcVirtAddr !== undefined && frame.offset !== undefined) {
-        line = 1;
-        column = Number(frame.funcVirtAddr) + Number(frame.offset);
-      }
-      if (
-        isJavaScript &&
-        Number.isSafeInteger(line) &&
-        line >= 1 &&
-        Number.isSafeInteger(column) &&
-        column >= 0
-      ) {
-        const original = consumer.originalPositionFor({ line, column });
-        if (original.source !== null && original.line !== null) {
-          name = `${original.name || name} (${original.source}:${
-            original.line
-          }:${(original.column ?? 0) + 1})`;
-          symbolicatedFrames++;
-        } else {
-          unmappedFrames++;
-          name += ' [unmapped JS]';
-        }
-      } else if (frame.category === 'JavaScript') {
-        unmappedFrames++;
-        name += ' [unmapped JS]';
-      }
-      interned.push(bytes(5, message(uint(1, id), bytes(2, name))));
-      interned.push(
-        bytes(
-          6,
-          message(
-            uint(1, id),
-            uint(2, id),
-            uint(3, isJavaScript ? 1 : 2),
-            uint(4, id)
-          )
+  const { frames, symbolicatedFrames, unmappedFrames } =
+    await symbolicateFrames(profile, sourceMap);
+  for (const [key, frame] of frames) {
+    const id = frameIds.size + 1;
+    frameIds.set(key, id);
+    interned.push(bytes(5, message(uint(1, id), bytes(2, frame.name))));
+    interned.push(
+      bytes(
+        6,
+        message(
+          uint(1, id),
+          uint(2, id),
+          uint(3, frame.kind === 'js' ? 1 : 2),
+          uint(4, id)
         )
-      );
-    }
-  } finally {
-    consumer.destroy();
-  }
-  if (!symbolicatedFrames)
-    throw new Error(
-      'Source map did not resolve any JS frames; use the exact release composed Hermes source map'
+      )
     );
+  }
   const stacks = new Map<string, number>();
   const samplePackets: Buffer[] = [];
   const sortedSamples = [...profile.samples].sort((a, b) =>
@@ -320,24 +278,34 @@ export async function mergeProfileBuffers(
   );
   for (const sample of sortedSamples) {
     if (Number(sample.pid) !== pid)
-      throw new Error('Hermes sample PID does not match session');
+      throw new ProfilerError(
+        'E_HERMES_PROFILE',
+        'Hermes sample PID does not match session'
+      );
     const tid = integer(sample.tid, 'tid');
-    if (!tid || tid > 0x7fffffffn) throw new Error('Invalid Hermes thread ID');
+    if (!tid || tid > 0x7fffffffn)
+      throw new ProfilerError('E_HERMES_PROFILE', 'Invalid Hermes thread ID');
     const leaf = String(sample.sf);
     let stackId = stacks.get(leaf);
     if (!stackId) {
-      const frames: number[] = [];
+      const frameIdsInStack: number[] = [];
       const visited = new Set<string>();
       let key: string | undefined = leaf;
       while (key !== undefined) {
         if (visited.has(key))
-          throw new Error('Cycle in Hermes stack frame parents');
+          throw new ProfilerError(
+            'E_HERMES_PROFILE',
+            'Cycle in Hermes stack frame parents'
+          );
         visited.add(key);
         const frame: Frame | undefined = profile.stackFrames[key];
         const id = frameIds.get(key);
         if (!frame || id === undefined)
-          throw new Error(`Missing Hermes stack frame ${key}`);
-        frames.push(id);
+          throw new ProfilerError(
+            'E_HERMES_PROFILE',
+            `Missing Hermes stack frame ${key}`
+          );
+        frameIdsInStack.push(id);
         key = frame.parent === undefined ? undefined : String(frame.parent);
       }
       stackId = stacks.size + 1;
@@ -347,7 +315,7 @@ export async function mergeProfileBuffers(
           7,
           message(
             uint(1, stackId),
-            ...frames.reverse().map((id) => uint(2, id))
+            ...frameIdsInStack.reverse().map((id) => uint(2, id))
           )
         )
       );
@@ -387,33 +355,67 @@ export async function mergeProfileBuffers(
   };
 }
 
+/** Read an exported session; artifact paths resolve next to session.json. */
+export function loadSession(session: string): {
+  manifest: ProfileSessionManifest;
+  hermesPath: string;
+  nativePath: string | null;
+} {
+  let manifest: ProfileSessionManifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(session, 'utf8'));
+  } catch (error) {
+    throw new ProfilerError(
+      'E_SESSION_MANIFEST',
+      `Cannot read session manifest ${session}: ${(error as Error).message}`
+    );
+  }
+  // Exported sessions live together. Device absolute paths are resolved by basename locally.
+  const resolve = (artifact: string | null) =>
+    artifact
+      ? path.resolve(path.dirname(session), path.basename(artifact))
+      : null;
+  const hermesPath = resolve(manifest.hermesProfilePath);
+  if (!hermesPath)
+    throw new ProfilerError(
+      'E_SESSION_MANIFEST',
+      'Session manifest has no Hermes profile'
+    );
+  return {
+    manifest,
+    hermesPath,
+    nativePath: resolve(manifest.nativeProfilePath),
+  };
+}
+
+export function nativeMissingError(manifest: ProfileSessionManifest) {
+  return new ProfilerError(
+    'E_NATIVE_MISSING',
+    `Native capture did not produce a profile (nativeStatus: ${manifest.nativeStatus}` +
+      (manifest.nativeError ? `, ${manifest.nativeError}` : '') +
+      ')'
+  );
+}
+
+export type MergeFormat = 'perfetto' | 'simpleperf' | 'folded';
+
 export async function mergeSession(options: {
   session: string;
   sourceMap: string;
   output: string;
-  format?: 'perfetto' | 'simpleperf';
+  format?: MergeFormat;
 }) {
-  const manifest = JSON.parse(
-    fs.readFileSync(options.session, 'utf8')
-  ) as ProfileSessionManifest;
-  const resolveArtifact = (artifact: string | null) => {
-    if (!artifact)
-      throw new Error(
-        `Native capture did not produce a profile (nativeStatus: ${manifest.nativeStatus}` +
-          (manifest.nativeError ? `, ${manifest.nativeError}` : '') +
-          ')'
-      );
-    // Exported sessions live together. Device absolute paths are resolved by basename locally.
-    return path.resolve(path.dirname(options.session), path.basename(artifact));
-  };
-  const nativePath = resolveArtifact(manifest.nativeProfilePath);
-  const hermesPath = resolveArtifact(manifest.hermesProfilePath);
+  const { manifest, hermesPath, nativePath } = loadSession(options.session);
+  if (!nativePath) throw nativeMissingError(manifest);
   if (
     [nativePath, hermesPath, options.session, options.sourceMap].some(
       (p) => path.resolve(p) === path.resolve(options.output)
     )
   ) {
-    throw new Error('Output must not overwrite an input artifact');
+    throw new ProfilerError(
+      'E_OUTPUT_CONFLICT',
+      'Output must not overwrite an input artifact'
+    );
   }
   const result = await mergeProfileBuffers(
     fs.readFileSync(nativePath),
@@ -421,10 +423,17 @@ export async function mergeSession(options: {
     manifest,
     fs.readFileSync(options.sourceMap, 'utf8')
   );
-  const outputTrace =
-    options.format !== 'perfetto'
-      ? toSimpleperf(result.trace, manifest.clockAnchors)
-      : result.trace;
+  let outputTrace = result.trace;
+  let skippedSamples: Record<string, number> = {};
+  if (options.format === 'folded') {
+    const decoded = decodeStackSamples(result.trace);
+    outputTrace = Buffer.from(toFolded(decoded.samples), 'utf8');
+    skippedSamples = decoded.skipped;
+  } else if (options.format !== 'perfetto') {
+    const simpleperf = toSimpleperf(result.trace, manifest.clockAnchors);
+    outputTrace = simpleperf.trace;
+    skippedSamples = simpleperf.skipped;
+  }
   fs.mkdirSync(path.dirname(path.resolve(options.output)), { recursive: true });
   fs.writeFileSync(
     options.output,
@@ -435,6 +444,9 @@ export async function mergeSession(options: {
     )
   );
   return {
+    output: options.output,
+    format: options.format ?? 'simpleperf',
+    sessionId: manifest.sessionId,
     samples: result.samples,
     nativeSamples: result.nativeSamples,
     symbolicatedFrames: result.symbolicatedFrames,
@@ -443,5 +455,6 @@ export async function mergeSession(options: {
     nativeFrequencyHz: result.nativeFrequencyHz,
     nativeRecordsLost: result.nativeRecordsLost,
     overlappingNativeSamples: result.overlappingNativeSamples,
+    skippedSamples,
   };
 }
