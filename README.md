@@ -33,6 +33,15 @@ devServer: {
 
 If you're having performance problems in your app, feel free to reach out to us at https://margelo.com. We do this a lot. 😉
 
+## Requirements
+
+- React Native **0.83 or newer** (New Architecture) with Hermes.
+- Hermes JS profiling (`startProfiling` / `stopProfiling`) works on Android, iOS and web.
+- Native + JS sampling (`startProfilingSession`, startup profiling, `pull-merge`) needs
+  **Android 15 (API 35) or newer** and a release build. On older Android versions it rejects
+  with `E_UNSUPPORTED`; Hermes-only profiling keeps working.
+- The CLI needs Node 18+ and, for Android, `adb` on your `PATH`.
+
 ## Installation
 
 ```sh

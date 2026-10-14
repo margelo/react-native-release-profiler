@@ -89,7 +89,7 @@
   "peerDependencies": {
     "@react-native-community/cli-tools": "*",
     "react": "*",
-    "react-native": "*"
+    "react-native": ">=0.83.0"
   },
   "workspaces": [
     "example"

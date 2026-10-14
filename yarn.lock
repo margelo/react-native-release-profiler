@@ -13787,7 +13787,7 @@ __metadata:
   peerDependencies:
     "@react-native-community/cli-tools": "*"
     react: "*"
-    react-native: "*"
+    react-native: ">=0.83.0"
   bin:
     react-native-release-profiler: lib/commonjs/cli.js
   languageName: unknown
