@@ -93,6 +93,18 @@ describe('assertSourceMapMatchesProfile', () => {
     ).toThrow('Source map does not match the profiled build: only 0 of 3');
   });
 
+  it('rejects a debug (source-position) profile with a release map', () => {
+    const debug = {
+      samples: [],
+      stackFrames: {
+        1: { name: 'f', category: 'JavaScript', line: '120', column: '4' },
+      },
+    } as unknown as HermesProfile;
+    expect(() => assertSourceMapMatchesProfile(map, debug)).toThrow(
+      'debug build'
+    );
+  });
+
   it('skips the check for maps without Hermes function offsets', () => {
     expect(() =>
       assertSourceMapMatchesProfile({}, profile(1, 2, 3))

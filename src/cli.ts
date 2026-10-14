@@ -8,8 +8,12 @@ import transformer from '@margelo/hermes-profile-transformer';
 import { getMetroBundleOptions } from './getMetroBundleOptions';
 import { generateSourcemap, findSourcemap } from './sourcemapUtils';
 import getConfig from './getConfig';
-import { mergeSession } from './mergeProfiles';
-import { pullMerge } from './pullMerge';
+import { mergeSession, type MergeFormat } from './mergeProfiles';
+import { pullMerge, pullSession } from './pullMerge';
+import { analyze, renderAnalysis, type AnalysisReport } from './analyze';
+import { compareReports, renderComparison } from './compare';
+import { renderDoctor, runDoctor } from './doctor';
+import { errorCode, ProfilerError } from './errors';
 
 // Most of the file is just a copy of https://github.com/react-native-community/cli/blob/main/packages/cli-hermes/src/profileHermes/downloadProfile.ts
 
@@ -223,60 +227,124 @@ function getFilename(path?: string) {
   return res;
 }
 
+// `--json`: print exactly one JSON object to stdout and nothing else, for agents and scripts.
+const jsonMode = process.argv.includes('--json');
+if (jsonMode) logger.disable();
+
+function emit(command: string, result: unknown, text?: string) {
+  if (jsonMode)
+    process.stdout.write(JSON.stringify({ ok: true, command, result }) + '\n');
+  else if (text) process.stdout.write(text);
+}
+
 /** Report what was actually captured, not only what was requested. */
-function reportMerge(
-  result: Awaited<ReturnType<typeof mergeSession>>,
-  output: string
-) {
-  logger.success(
-    `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${output}; ${result.symbolicatedFrames} symbolicated frames`
-  );
-  if (result.nativeFrequencyHz !== undefined) {
-    const requested = result.requestedFrequencyHz;
-    if (requested !== undefined && requested !== result.nativeFrequencyHz)
-      logger.warn(
-        `Android clamped native sampling to ${result.nativeFrequencyHz} Hz (requested ${requested} Hz)`
-      );
-    else logger.info(`Native sampling ran at ${result.nativeFrequencyHz} Hz`);
-  }
+function mergeWarnings(
+  result: Awaited<ReturnType<typeof mergeSession>>
+): string[] {
+  const warnings: string[] = [];
+  const requested = result.requestedFrequencyHz;
+  if (
+    result.nativeFrequencyHz !== undefined &&
+    requested !== undefined &&
+    requested !== result.nativeFrequencyHz
+  )
+    warnings.push(
+      `Android clamped native sampling to ${result.nativeFrequencyHz} Hz (requested ${requested} Hz)`
+    );
   if (!result.overlappingNativeSamples)
-    logger.warn(
+    warnings.push(
       'No native samples overlap the JS samples: native sampling ended before JS sampling started (e.g. a startup recording adopted late)'
     );
   if (result.nativeRecordsLost)
-    logger.warn(
+    warnings.push(
       `${result.nativeRecordsLost} native sample records were lost by the kernel buffer; native counts are a lower bound`
     );
+  const skipped = Object.values(result.skippedSamples).reduce(
+    (a, b) => a + b,
+    0
+  );
+  if (skipped)
+    warnings.push(
+      `${skipped} malformed native samples were skipped: ${JSON.stringify(
+        result.skippedSamples
+      )}`
+    );
   if (result.unmappedFrames)
-    logger.warn(`${result.unmappedFrames} JS frames could not be mapped`);
+    warnings.push(`${result.unmappedFrames} JS frames could not be mapped`);
+  return warnings;
 }
+
+function reportMerge(
+  command: string,
+  result: Awaited<ReturnType<typeof mergeSession>>
+) {
+  const warnings = mergeWarnings(result);
+  if (jsonMode) return emit(command, { ...result, warnings });
+  logger.success(
+    `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${result.output}; ${result.symbolicatedFrames} symbolicated frames`
+  );
+  if (
+    result.nativeFrequencyHz !== undefined &&
+    !warnings[0]?.startsWith('Android clamped')
+  )
+    logger.info(`Native sampling ran at ${result.nativeFrequencyHz} Hz`);
+  warnings.forEach((warning) => logger.warn(warning));
+}
+
+const defaultOutput = (format: MergeFormat) =>
+  format === 'simpleperf'
+    ? 'merged.trace'
+    : format === 'folded'
+    ? 'merged.folded.txt'
+    : 'merged.perfetto-trace';
+
+const requireSourceMap = (
+  options: { sourcemapPath?: string },
+  command: string
+) => {
+  if (!options.sourcemapPath)
+    throw new ProfilerError(
+      'E_USAGE',
+      `${command} requires --sourcemap-path from the exact release build`
+    );
+  return options.sourcemapPath;
+};
 
 const { program, Option } = require('commander');
 
 program
+  .configureHelp({ showGlobalOptions: true })
   // Reject typos such as `pul-merge` instead of running the legacy download flow.
   .allowExcessArguments(false)
-  .option('--filename <string>')
-  .option('--sourcemap-path <string>')
-  .option('--generate-sourcemap')
-  .option('--port <number>')
-  .option('--appId <string>')
-  .option('--appIdSuffix <string>')
-  .option('--fromDownload')
-  .option('--raw')
-  .option('--local <string>')
+  .exitOverride()
+  .option('--json', 'Print one JSON object to stdout (for agents and scripts)')
+  .option(
+    '--sourcemap-path <path>',
+    'Composed Hermes source map from the exact installed release build'
+  )
+  .option(
+    '--appId <id>',
+    "Android application ID (selects that app's sessions; legacy: app to pull from)"
+  )
+  .option('--filename <string>', 'Legacy: profile file name to pull')
+  .option('--generate-sourcemap', 'Legacy: generate a source map with Metro')
+  .option('--port <number>', 'Legacy: Metro port')
+  .option('--appIdSuffix <string>', 'Legacy: application ID suffix')
+  .option('--fromDownload', 'Legacy: pull the profile from Downloads')
+  .option('--raw', 'Legacy: pull the Hermes profile without converting it')
+  .option('--local <string>', 'Legacy: convert a local Hermes profile')
   .option(
     '--merge-session <path>',
     'Merge an exported native and Hermes profiling session'
   )
   .addOption(
     new Option('--format <format>', 'Merged output format')
-      .choices(['perfetto', 'simpleperf'])
+      .choices(['perfetto', 'simpleperf', 'folded'])
       .default('simpleperf')
   )
   .option(
     '--output <path>',
-    'Merged output (default: merged.trace; Perfetto: merged.perfetto-trace)'
+    'Output file (merge default: merged.trace / merged.perfetto-trace / merged.folded.txt)'
   );
 
 program
@@ -292,45 +360,145 @@ program
   )
   .action(async (sessionId: string | undefined, commandOptions: any) => {
     const options = { ...program.opts(), ...commandOptions };
-    options.output ??=
-      options.format === 'simpleperf'
-        ? 'merged.trace'
-        : 'merged.perfetto-trace';
-    if (!options.sourcemapPath) {
-      throw new Error(
-        'pull-merge requires --sourcemap-path from the exact release build'
-      );
-    }
+    options.output ??= defaultOutput(options.format);
     const result = await pullMerge({
       sessionId,
       device: options.device,
       directory: options.directory,
-      sourceMap: options.sourcemapPath,
+      appId: options.appId,
+      sourceMap: requireSourceMap(options, 'pull-merge'),
       output: options.output,
       format: options.format,
     });
-    reportMerge(result, options.output);
+    reportMerge('pull-merge', result);
+  });
+
+program
+  .command('analyze [session]')
+  .description(
+    'Summarize a capture: JS hotspots with source lines, long tasks, native breakdown and capture quality'
+  )
+  .option(
+    '--profile <path>',
+    'Analyze a Hermes .cpuprofile without a session (JS only)'
+  )
+  .option(
+    '--pull',
+    'Pull the session from the device first (latest, or [session] as an ID)'
+  )
+  .option('--device <serial>', 'ADB device serial')
+  .option('--directory <path>', 'Directory for pulled sessions', '.')
+  .option('--long-task <ms>', 'Long task threshold in ms', '50')
+  .option('--top <n>', 'Rows per table', '15')
+  .addHelpText(
+    'after',
+    '\n[session] is session.json or its directory. Requires --sourcemap-path. With --output, writes JSON (*.json) or Markdown.'
+  )
+  .action(async (session: string | undefined, commandOptions: any) => {
+    const options = { ...program.opts(), ...commandOptions };
+    const sourceMap = requireSourceMap(options, 'analyze');
+    let target = session;
+    if (options.pull)
+      target = pullSession({
+        sessionId: session,
+        device: options.device,
+        directory: options.directory,
+        appId: options.appId,
+      }).directory;
+    const report = await analyze({
+      session: target,
+      profile: options.profile,
+      sourceMap,
+      longTaskMs: Number(options.longTask),
+      top: Number(options.top),
+    });
+    const markdown = renderAnalysis(report);
+    if (options.output)
+      fs.writeFileSync(
+        options.output,
+        options.output.endsWith('.json')
+          ? JSON.stringify(report, null, 2)
+          : markdown
+      );
+    emit('analyze', report, markdown);
+  });
+
+program
+  .command('compare <before> <after>')
+  .description(
+    'Compare two `analyze --output <file>.json` reports, e.g. before and after a fix'
+  )
+  .action((before: string, after: string) => {
+    const options = program.opts();
+    const read = (file: string): AnalysisReport => {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      // Accept both raw reports and `--json` envelopes.
+      return parsed.command === 'analyze' ? parsed.result : parsed;
+    };
+    const comparison = compareReports(
+      read(before),
+      read(after),
+      Number(options.top ?? 15)
+    );
+    emit('compare', comparison, renderComparison(comparison));
+  });
+
+program
+  .command('doctor')
+  .description(
+    'Check the device, rate limiter, exported sessions and source map before recording or merging'
+  )
+  .option('--device <serial>', 'ADB device serial')
+  .action((commandOptions: any) => {
+    const options = { ...program.opts(), ...commandOptions };
+    const checks = runDoctor({
+      device: options.device,
+      appId: options.appId,
+      sourceMap: options.sourcemapPath,
+    });
+    emit('doctor', { checks }, renderDoctor(checks));
+    if (checks.some((check) => check.status === 'fail')) process.exitCode = 1;
+  });
+
+program
+  .command('install-skill <directory>')
+  .description(
+    "Copy the AI agent skill into an agent's skills directory (e.g. .claude/skills)"
+  )
+  .action((directory: string) => {
+    const source = path.join(
+      __dirname,
+      '..',
+      '..',
+      'skills',
+      'react-native-release-profiler'
+    );
+    const destination = path.resolve(
+      directory,
+      'react-native-release-profiler'
+    );
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.cpSync(source, destination, { recursive: true });
+    emit(
+      'install-skill',
+      { installed: destination },
+      `Installed skill to ${destination}\n`
+    );
   });
 
 program.action(async () => {
   const options = program.opts();
-  options.output ??=
-    options.format === 'simpleperf' ? 'merged.trace' : 'merged.perfetto-trace';
+  options.output ??= defaultOutput(options.format);
   const dstPath = '.';
   const task = options.mergeSession
     ? (async () => {
-        if (!options.sourcemapPath) {
-          throw new Error(
-            '--merge-session requires --sourcemap-path from the exact release build'
-          );
-        }
         const result = await mergeSession({
           session: options.mergeSession,
-          sourceMap: options.sourcemapPath,
+          sourceMap: requireSourceMap(options, '--merge-session'),
           output: options.output,
           format: options.format,
         });
-        reportMerge(result, options.output);
+        reportMerge('merge-session', result);
       })()
     : downloadProfile(
         options.local,
@@ -348,7 +516,20 @@ program.action(async () => {
   await task;
 });
 
-program.parseAsync().catch((error: Error) => {
-  logger.error(error.message);
+if (jsonMode) program.configureOutput({ writeErr: () => {} });
+
+program.parseAsync().catch((error: any) => {
+  // Commander already printed usage errors and help (exitOverride makes them throw).
+  if (typeof error?.code === 'string' && error.code.startsWith('commander.')) {
+    process.exitCode = error.exitCode ?? 1;
+    if (!jsonMode || !process.exitCode) return;
+  }
+  const code = errorCode(error);
+  if (jsonMode)
+    process.stdout.write(
+      JSON.stringify({ ok: false, error: { code, message: error.message } }) +
+        '\n'
+    );
+  else logger.error(`${error.message} [${code}]`);
   process.exitCode = 1;
 });

@@ -1,5 +1,6 @@
 /* eslint-disable no-bitwise -- Protobuf varints encode integer bits. */
 import { inflateSync } from 'zlib';
+import { ProfilerError } from './errors';
 
 /** Minimal wire-format helpers for the stable Perfetto fields used by the merger.
  * Field definitions: google/perfetto protos/perfetto/trace/{trace_packet,
@@ -9,7 +10,10 @@ import { inflateSync } from 'zlib';
 export function varint(value: bigint | number): Buffer {
   let n = BigInt(value);
   if (n < 0n || n > 0xffffffffffffffffn) {
-    throw new Error('Protobuf integer is outside uint64 range');
+    throw new ProfilerError(
+      'E_TRACE_FORMAT',
+      'Protobuf integer is outside uint64 range'
+    );
   }
   const encoded = [];
   do {
@@ -57,17 +61,21 @@ export function* fields(data: Buffer): Generator<WireField> {
     for (let shift = 0n; shift < 70n; shift += 7n) {
       const b = data[offset++];
       if (b === undefined || (shift === 63n && b > 1)) {
-        throw new Error('Malformed or truncated protobuf varint');
+        throw new ProfilerError(
+          'E_TRACE_FORMAT',
+          'Malformed or truncated protobuf varint'
+        );
       }
       value |= BigInt(b & 127) << shift;
       if (!(b & 128)) return value;
     }
-    throw new Error('Invalid protobuf varint');
+    throw new ProfilerError('E_TRACE_FORMAT', 'Invalid protobuf varint');
   };
   while (offset < data.length) {
     const tag = read();
     const id = Number(tag >> 3n);
-    if (!id || id > 0x1fffffff) throw new Error('Invalid protobuf field');
+    if (!id || id > 0x1fffffff)
+      throw new ProfilerError('E_TRACE_FORMAT', 'Invalid protobuf field');
     const wire = Number(tag & 7n);
     if (wire === 0) {
       yield { id, value: read() };
@@ -79,7 +87,10 @@ export function* fields(data: Buffer): Generator<WireField> {
         !Number.isSafeInteger(length) ||
         offset + length > data.length
       ) {
-        throw new Error('Malformed or truncated protobuf payload');
+        throw new ProfilerError(
+          'E_TRACE_FORMAT',
+          'Malformed or truncated protobuf payload'
+        );
       }
       yield { id, value: data.subarray(offset, offset + length) };
       offset += length;
@@ -128,10 +139,16 @@ export function inspectNativeTrace(trace: Buffer): {
   const stackSampleCounts = new Map<number, number>();
   const inspect = (data: Buffer, depth: number) => {
     if (depth > 4)
-      throw new Error('Excessively nested compressed Perfetto packets');
+      throw new ProfilerError(
+        'E_TRACE_FORMAT',
+        'Excessively nested compressed Perfetto packets'
+      );
     for (const field of fields(data)) {
       if (field.id !== 1 || !Buffer.isBuffer(field.value)) {
-        throw new Error('Expected an uncompressed Perfetto Trace protobuf');
+        throw new ProfilerError(
+          'E_TRACE_FORMAT',
+          'Expected an uncompressed Perfetto Trace protobuf'
+        );
       }
       count++;
       const packetFields = [...fields(field.value)];
@@ -166,7 +183,8 @@ export function inspectNativeTrace(trace: Buffer): {
               depth + 1
             );
           } catch (error) {
-            throw new Error(
+            throw new ProfilerError(
+              'E_TRACE_FORMAT',
               `Invalid compressed Perfetto packets: ${String(error)}`
             );
           }
@@ -191,10 +209,9 @@ export function inspectNativeTrace(trace: Buffer): {
           }
           if (pid > 0) {
             samplePids.add(pid);
-            if (hasStack) {
+            // Samples without a timestamp are unusable; skip them like the exporters do.
+            if (hasStack && timestamp !== undefined) {
               stackSampleCounts.set(pid, (stackSampleCounts.get(pid) ?? 0) + 1);
-              if (timestamp === undefined)
-                throw new Error('Native stack sample has no timestamp');
               sampleTimes.push({ pid, timestamp, clockId });
             }
           }
@@ -207,7 +224,7 @@ export function inspectNativeTrace(trace: Buffer): {
   };
   inspect(trace, 0);
   if (!count || max >= 0xffffffff)
-    throw new Error('Invalid native Perfetto trace');
+    throw new ProfilerError('E_TRACE_FORMAT', 'Invalid native Perfetto trace');
   return {
     sequence: max + 1,
     samplePids,
