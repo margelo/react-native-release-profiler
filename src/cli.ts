@@ -6,7 +6,13 @@ import os from 'os';
 import { execSync } from 'child_process';
 import transformer from '@margelo/hermes-profile-transformer';
 import { getMetroBundleOptions } from './getMetroBundleOptions';
-import { generateSourcemap, findSourcemap } from './sourcemapUtils';
+import {
+  generateSourcemap,
+  findSourcemap,
+  flattenSourceMap,
+  isBytecodeProfile,
+  sourceMapFits,
+} from './sourcemapUtils';
 import getConfig from './getConfig';
 import { mergeSession, type MergeFormat } from './mergeProfiles';
 import { pullMerge, pullSession } from './pullMerge';
@@ -169,16 +175,34 @@ export async function downloadProfile(
           `adb shell run-as ${packageNameWithSuffix} cat cache/${file} > ${tempFilePath}`
         );
       }
+      // Read before maybeAddLineAndColumn() rewrites bytecode addresses as positions.
+      const profile = JSON.parse(fs.readFileSync(tempFilePath, 'utf8'));
       maybeAddLineAndColumn(tempFilePath);
       const bundleOptions = getMetroBundleOptions(tempFilePath, 'localhost');
 
-      // If path to source map is not given
-      if (!sourcemapPath) {
+      // A map from another build "resolves" frames to the wrong code; refuse it.
+      const checkMap = (map: string) => {
+        const fit = sourceMapFits(map, profile);
+        if (!fit.ok)
+          throw new ProfilerError(
+            'E_SOURCEMAP_MISMATCH',
+            `Source map ${map} does not match this profile: ${fit.reason}`
+          );
+      };
+
+      if (sourcemapPath) checkMap(sourcemapPath);
+      else {
         // Get or generate the source map
         if (shouldGenerateSourcemap) {
           sourcemapPath = await generateSourcemap(port, bundleOptions);
+          if (sourcemapPath) checkMap(sourcemapPath);
         } else {
-          sourcemapPath = await findSourcemap(ctx, port, bundleOptions);
+          sourcemapPath = await findSourcemap(
+            ctx,
+            port,
+            bundleOptions,
+            profile
+          );
         }
 
         // Run without source map
@@ -187,12 +211,15 @@ export async function downloadProfile(
             'Cannot find source maps, running the transformer without it'
           );
           logger.info(
-            'Instructions on how to get source maps: set `bundleInDebug: true` in your app/build.gradle file, inside the `project.ext.react` map.'
+            isBytecodeProfile(profile)
+              ? 'Function names are kept but source files and lines will be missing. Pass --sourcemap-path with the composed map of the exact release build (android/app/build/generated/sourcemaps/react/release/index.android.bundle.map).'
+              : 'Instructions on how to get source maps: set `bundleInDebug: true` in your app/build.gradle file, inside the `project.ext.react` map.'
           );
         }
       }
 
       // Run transformer tool to convert from Hermes to Chrome format
+      if (sourcemapPath) sourcemapPath = await flattenSourceMap(sourcemapPath);
       const events = await transformer(
         tempFilePath,
         sourcemapPath,
