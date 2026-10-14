@@ -4,12 +4,13 @@ import path from 'path';
 import { ProfilerError } from './errors';
 import { toFolded } from './folded';
 import { symbolicateFrames } from './symbolicate';
-import { decodeStackSamples } from './traceSamples';
+import { decodeStackSamples, type StackSample } from './traceSamples';
 import {
   bytes,
   concat,
   message,
   inspectNativeTrace,
+  nativeCoverage,
   packet,
   uint,
 } from './perfettoProto';
@@ -145,6 +146,10 @@ export async function mergeProfileBuffers(
   nativeFrequencyHz?: number;
   nativeRecordsLost: number;
   overlappingNativeSamples: number;
+  /** Native samples that could not be decoded, by reason. */
+  skippedNativeSamples: Record<string, number>;
+  /** Native data loss: buffer overflow, sampling started late or stopped early, damage. */
+  nativeWarnings: string[];
 }> {
   if (
     manifest.version !== 1 ||
@@ -169,25 +174,33 @@ export async function mergeProfileBuffers(
       'Hermes profile has no samples or stack frames'
     );
   }
-  const {
-    sequence,
-    samplePids,
-    stackSampleCounts,
-    sampleTimes,
-    samplingFrequencyHz,
-    kernelRecordsLost,
-  } = inspectNativeTrace(nativeTrace);
+  const native = inspectNativeTrace(nativeTrace);
+  const { sequence, samplingFrequencyHz, kernelRecordsLost } = native;
+  // Appending to a truncated trace would glue the Hermes packets onto its cut-off last
+  // packet; keep only the intact packets.
+  const intactTrace =
+    native.intactBytes < nativeTrace.length
+      ? nativeTrace.subarray(0, native.intactBytes)
+      : nativeTrace;
+  // Validate and count what the exporters can decode, not raw packets.
+  const decoded = decodeStackSamples(intactTrace);
+  const samplePids = new Set(decoded.samples.map((s) => Number(s.pid)));
+  const appSamples = decoded.samples.filter((s) => Number(s.pid) === pid);
   if (samplePids.size && !samplePids.has(pid)) {
     throw new ProfilerError(
       'E_WRONG_NATIVE_TRACE',
       'Native sample PIDs do not match the session; wrong native trace'
     );
   }
-  const nativeSamples = stackSampleCounts.get(pid) ?? 0;
+  const nativeSamples = appSamples.length;
   if (!nativeSamples) {
     throw new ProfilerError(
       'E_NO_NATIVE_SAMPLES',
-      'Native trace contains no stack samples for this app. ProfilingManager may return success after sampling failed or Android removed sample payloads during redaction; this capture cannot be merged.'
+      `Native trace contains no stack samples for this app${
+        Object.keys(decoded.skipped).length
+          ? ` (undecodable: ${JSON.stringify(decoded.skipped)})`
+          : ''
+      }. ProfilingManager may return success after sampling failed or Android removed sample payloads during redaction; this capture cannot be merged.`
     );
   }
   const mapTime = createClockMapper(manifest.clockAnchors);
@@ -201,17 +214,12 @@ export async function mergeProfileBuffers(
     .sort((a, b) => (a.mono < b.mono ? -1 : a.mono > b.mono ? 1 : 0));
   const first = clocks[0]!;
   const last = clocks[clocks.length - 1]!;
-  const nativeTimes = sampleTimes
-    .filter((sample) => sample.pid === pid)
-    .map((sample) => {
-      if (sample.clockId === 6) return sample.timestamp;
-      if (sample.clockId === 3)
-        return sample.timestamp + first.boot - first.mono;
-      throw new ProfilerError(
-        'E_TRACE_FORMAT',
-        `Unsupported native sample clock ${sample.clockId}; cannot verify session time coverage`
-      );
-    });
+  // The decoder already skipped samples with other clocks.
+  const nativeTimes = appSamples.map((sample) =>
+    sample.clock === 3
+      ? sample.timestamp + first.boot - first.mono
+      : sample.timestamp
+  );
   // Require some native coverage during this session, not during Hermes alone:
   // early native samples are useful, and native sampling can continue after stop.
   const nativeRequest = manifest.boundaries?.nativeRequest;
@@ -344,7 +352,7 @@ export async function mergeProfileBuffers(
     )
   );
   return {
-    trace: concat([nativeTrace, setup, ...samplePackets]),
+    trace: concat([intactTrace, setup, ...samplePackets]),
     samples: samplePackets.length,
     nativeSamples,
     symbolicatedFrames,
@@ -352,6 +360,8 @@ export async function mergeProfileBuffers(
     nativeFrequencyHz: samplingFrequencyHz,
     nativeRecordsLost: kernelRecordsLost,
     overlappingNativeSamples,
+    skippedNativeSamples: decoded.skipped,
+    nativeWarnings: nativeCoverage(native, manifest).warnings,
   };
 }
 
@@ -424,15 +434,25 @@ export async function mergeSession(options: {
     fs.readFileSync(options.sourceMap, 'utf8')
   );
   let outputTrace = result.trace;
-  let skippedSamples: Record<string, number> = {};
+  let skippedSamples = result.skippedNativeSamples;
+  let samples = result.samples;
+  let nativeSamples = result.nativeSamples;
+  const count = (exported: StackSample[]) => {
+    samples = exported.filter((s) => s.hermes).length;
+    nativeSamples = exported.filter(
+      (s) => !s.hermes && Number(s.pid) === Number(manifest.pid)
+    ).length;
+  };
   if (options.format === 'folded') {
     const decoded = decodeStackSamples(result.trace);
     outputTrace = Buffer.from(toFolded(decoded.samples), 'utf8');
     skippedSamples = decoded.skipped;
+    count(decoded.samples);
   } else if (options.format !== 'perfetto') {
     const simpleperf = toSimpleperf(result.trace, manifest.clockAnchors);
     outputTrace = simpleperf.trace;
     skippedSamples = simpleperf.skipped;
+    count(simpleperf.samples);
   }
   fs.mkdirSync(path.dirname(path.resolve(options.output)), { recursive: true });
   fs.writeFileSync(
@@ -447,8 +467,10 @@ export async function mergeSession(options: {
     output: options.output,
     format: options.format ?? 'simpleperf',
     sessionId: manifest.sessionId,
-    samples: result.samples,
-    nativeSamples: result.nativeSamples,
+    // Samples in the output. Perfetto copies native packets as is; this counts the
+    // decodable ones.
+    samples,
+    nativeSamples,
     symbolicatedFrames: result.symbolicatedFrames,
     unmappedFrames: result.unmappedFrames,
     requestedFrequencyHz: manifest.requestedOptions?.samplingFrequencyHz,
@@ -456,5 +478,6 @@ export async function mergeSession(options: {
     nativeRecordsLost: result.nativeRecordsLost,
     overlappingNativeSamples: result.overlappingNativeSamples,
     skippedSamples,
+    nativeWarnings: result.nativeWarnings,
   };
 }
