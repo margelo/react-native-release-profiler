@@ -13,7 +13,9 @@ object NativeProfiling {
    * Call after super.attachBaseContext(base), or from Application.onCreate(),
    * before React Native/SoLoader initialization.
    * Only Android sampling starts here. The first JS startProfilingSession() enables
-   * Hermes and adopts this native recording; its options are ignored.
+   * Hermes and adopts this native recording (`adopted: true`); its options are still
+   * validated but these startup options stay in effect. Native sampling is not restarted:
+   * when it already ended, the session reports `nativeEndedBeforeAdoption: true`.
    * Stop and export through that JS session using the normal CLI workflow.
    * Native sampling starts asynchronously and may miss the earliest startup work.
    * Throws when Android is older than API 35, another profiler is active, or setup fails.

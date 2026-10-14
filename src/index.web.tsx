@@ -36,19 +36,7 @@ type ProfilingTrace = {
   stacks: Stack[];
 };
 
-const NOT_STARTED_PROFILER = {
-  stop: (): Promise<ProfilingTrace> => {
-    console.warn('The profiler has not been started');
-
-    return Promise.resolve({
-      frames: [],
-      resources: [],
-      samples: [],
-      stacks: [],
-    });
-  },
-};
-let profiler = NOT_STARTED_PROFILER;
+let profiler: { stop(): Promise<ProfilingTrace> } | null = null;
 
 const SAMPLING_INTERVAL = 10;
 const MAX_BUFFER_SIZE = 10000;
@@ -60,11 +48,18 @@ export type {
   ProfilingSession,
 } from './index';
 
-/** Native sampling is only available on Android 15 and newer. */
+function codedError(code: string, message: string): Error & { code: string } {
+  return Object.assign(new Error(message), { code });
+}
+
+/** Native sampling is only available on Android 15 and newer: rejects with `E_UNSUPPORTED`. */
 export async function startProfilingSession(
   _options: import('./index').ProfilingSessionOptions = {}
 ): Promise<import('./index').ProfilingSession> {
-  throw new Error('Native sampling requires Android 15 (API 35) or newer.');
+  throw codedError(
+    'E_UNSUPPORTED',
+    'Native sampling requires Android 15 (API 35) or newer.'
+  );
 }
 
 export function startProfiling(): boolean {
@@ -88,9 +83,16 @@ export async function stopProfiling(
   saveToDownloads = false,
   fileName = `trace-${new Date().toISOString()}.cpuprofile.txt`
 ): Promise<string> {
+  if (!profiler) {
+    // Don't download an empty trace that looks like a real capture.
+    throw codedError(
+      'E_NOT_STARTED',
+      'stopProfiling() was called without startProfiling(); nothing was recorded.'
+    );
+  }
   const trace = await profiler.stop();
 
-  profiler = NOT_STARTED_PROFILER;
+  profiler = null;
 
   const hermesProfiler = convertToHermesProfilerFormat(trace);
 
