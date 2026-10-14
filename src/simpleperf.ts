@@ -1,7 +1,7 @@
 import { ProfilerError } from './errors';
 import { bytes, concat, message, uint } from './perfettoProto';
 import type { ClockAnchor } from './mergeProfiles';
-import { decodeStackSamples } from './traceSamples';
+import { decodeStackSamples, type StackSample } from './traceSamples';
 
 // Simpleperf report-sample --protobuf container and schema:
 // https://android.googlesource.com/platform/system/extras/+/main/simpleperf/cmd_report_sample.proto
@@ -9,7 +9,12 @@ import { decodeStackSamples } from './traceSamples';
 export function toSimpleperf(
   trace: Buffer,
   anchors: ClockAnchor[]
-): { trace: Buffer; skipped: Record<string, number> } {
+): {
+  trace: Buffer;
+  skipped: Record<string, number>;
+  /** The samples in the export. */
+  samples: StackSample[];
+} {
   const first = anchors[0];
   if (!first)
     throw new ProfilerError(
@@ -18,10 +23,20 @@ export function toSimpleperf(
     );
   const bootOffset = BigInt(first.boottimeNs) - BigInt(first.monotonicNs);
   const decoded = decodeStackSamples(trace);
+  const skipped = { ...decoded.skipped };
+  // Simpleperf times are CLOCK_MONOTONIC uint64. A BOOTTIME timestamp earlier than the
+  // boot/monotonic offset (corrupt or mislabeled) has no such time: skip that sample.
+  const exported = decoded.samples.filter((sample) => {
+    const time = sample.timestamp - (sample.clock === 6 ? bootOffset : 0n);
+    if (time >= 0n && time <= 0xffffffffffffffffn) return true;
+    skipped['timestamp out of range'] =
+      (skipped['timestamp out of range'] ?? 0) + 1;
+    return false;
+  });
   const files = new Map<string, { id: number; symbols: Map<string, number> }>();
   const threads = new Map<bigint, bigint>();
   const hermesThreads = new Set<bigint>();
-  const samples = decoded.samples.map((sample) => {
+  const samples = exported.map((sample) => {
     threads.set(sample.tid, sample.pid);
     if (sample.hermes) hermesThreads.add(sample.tid);
     const chain = sample.frames.map((frame) => {
@@ -54,8 +69,8 @@ export function toSimpleperf(
     throw new ProfilerError(
       'E_NO_NATIVE_SAMPLES',
       `No stack samples to export${
-        Object.keys(decoded.skipped).length
-          ? ` (skipped: ${JSON.stringify(decoded.skipped)})`
+        Object.keys(skipped).length
+          ? ` (skipped: ${JSON.stringify(skipped)})`
           : ''
       }`
     );
@@ -153,5 +168,5 @@ export function toSimpleperf(
     }),
     Buffer.alloc(4),
   ]);
-  return { trace: output, skipped: decoded.skipped };
+  return { trace: output, skipped, samples: exported };
 }

@@ -282,6 +282,7 @@ function mergeWarnings(
     warnings.push(
       'No native samples overlap the JS samples: native sampling ended before JS sampling started (e.g. a startup recording adopted late)'
     );
+  warnings.push(...result.nativeWarnings);
   if (result.nativeRecordsLost)
     warnings.push(
       `${result.nativeRecordsLost} native sample records were lost by the kernel buffer; native counts are a lower bound`
@@ -292,7 +293,7 @@ function mergeWarnings(
   );
   if (skipped)
     warnings.push(
-      `${skipped} malformed native samples were skipped: ${JSON.stringify(
+      `${skipped} native samples were unusable and skipped: ${JSON.stringify(
         result.skippedSamples
       )}`
     );
@@ -306,7 +307,9 @@ function reportMerge(
   result: Awaited<ReturnType<typeof mergeSession>>
 ) {
   const warnings = mergeWarnings(result);
-  if (jsonMode) return emit(command, { ...result, warnings });
+  // `warnings` already includes nativeWarnings.
+  if (jsonMode)
+    return emit(command, { ...result, nativeWarnings: undefined, warnings });
   logger.success(
     `Merged ${result.nativeSamples} native and ${result.samples} JS samples into ${result.output}; ${result.symbolicatedFrames} symbolicated frames`
   );
