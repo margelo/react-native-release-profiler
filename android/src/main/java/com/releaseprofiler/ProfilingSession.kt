@@ -14,6 +14,38 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
+/** Session directories kept in app-private storage (newest first, including a new one). */
+internal const val KEPT_SESSIONS = 5
+private val SESSION_ID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+/**
+ * Copies [file] into the public Downloads collection under [relativePath] and returns its URI.
+ * The generic MIME type keeps the file name; text/plain would make Android append ".txt".
+ */
+@TargetApi(29)
+internal fun exportToDownloads(context: Context, file: File, relativePath: String): String {
+  val resolver = context.contentResolver
+  val values = ContentValues().apply {
+    put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+    put(MediaStore.MediaColumns.IS_PENDING, 1)
+  }
+  val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+    ?: throw IllegalStateException("Cannot create Downloads artifact")
+  try {
+    resolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
+      ?: throw IllegalStateException("Cannot open Downloads artifact")
+    values.clear()
+    values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+    resolver.update(uri, values, null, null)
+    return uri.toString()
+  } catch (error: Exception) {
+    resolver.delete(uri, null, null)
+    throw error
+  }
+}
+
 /** All state is guarded by this instance; no polling or continuous clock synchronization. */
 internal class ProfilingSessions(private val context: Context) {
   private val handler = Handler(Looper.getMainLooper())
@@ -30,15 +62,19 @@ internal class ProfilingSessions(private val context: Context) {
     legacyActive = true
   }
 
-  @Synchronized fun stopLegacy(outputPath: String): Boolean {
-    if (active?.awaitingAdoption == false) return false
+  /** Writes the legacy profile; returns null on success, otherwise the code to reject with. */
+  @Synchronized fun stopLegacy(outputPath: String): String? {
+    if (active?.awaitingAdoption == false) return "E_BUSY"
+    // Without startProfiling() there is nothing to dump; an empty profile would hide real ones.
+    if (!legacyActive) return "E_NOT_STARTED"
+    legacyActive = false
     HermesProfilerBridge.disable()
     HermesProfilerBridge.dumpSampledTraceToFile(outputPath)
-    legacyActive = false
-    return true
+    return null
   }
 
-  private class Session(val id: String, val directory: File, val timeoutMs: Long) {
+  private class Session(val id: String, val directory: File, val durationMs: Int, val timeoutMs: Long) {
+    val requestedAtNs = System.nanoTime()
     val cancellation = CancellationSignal()
     val anchors = JSONArray()
     val boundaries = JSONObject()
@@ -51,6 +87,9 @@ internal class ProfilingSessions(private val context: Context) {
     var completion: Promise? = null
     var stopped = false
     var awaitingAdoption = false
+    var adopted = false
+    var nativeEndedBeforeAdoption = false
+    var ignoredOptions: JSONObject? = null
     var saveToDownloads = false
     var timeout: Runnable? = null
   }
@@ -118,12 +157,31 @@ internal class ProfilingSessions(private val context: Context) {
       promise.reject("E_BUSY", "Legacy Hermes profiling is already active")
       return
     }
+    // Validate before adopting too, so invalid options never resolve.
+    val given = JSONObject()
+    val parameters = try {
+      listOf("durationMs" to 30000, "samplingFrequencyHz" to 100, "bufferSizeKb" to 8192,
+        "resultTimeoutMs" to 120000).map { (key, default) ->
+        positiveInt(options, key, default).also { if (options.hasKey(key)) given.put(key, it) }
+      }
+    } catch (error: Exception) {
+      promise.reject("E_OPTIONS", error)
+      return
+    }
     active?.let { session ->
       if (session.awaitingAdoption && !session.stopped) {
         try {
+          // Native sampling is not restarted: report when it has already ended, since this
+          // JS session then gets no overlapping native samples.
+          val ended = session.nativeStatus != "pending" ||
+            System.nanoTime() - session.requestedAtNs >= session.durationMs * 1_000_000L
           startHermes(session)
           session.awaitingAdoption = false
-          promise.resolve(session.id)
+          session.adopted = true
+          session.nativeEndedBeforeAdoption = ended
+          // The startup recording's options stay in effect.
+          if (given.length() > 0) session.ignoredOptions = given
+          promise.resolve(startResult(session))
         } catch (error: Throwable) {
           promise.reject("E_START", error)
         }
@@ -132,27 +190,27 @@ internal class ProfilingSessions(private val context: Context) {
       }
       return
     }
-    val parameters = try {
-      intArrayOf(
-        positiveInt(options, "durationMs", 30000),
-        positiveInt(options, "samplingFrequencyHz", 100),
-        positiveInt(options, "bufferSizeKb", 8192),
-        positiveInt(options, "resultTimeoutMs", 120000)
-      )
-    } catch (error: Exception) {
-      promise.reject("E_OPTIONS", error)
-      return
-    }
     try {
-      promise.resolve(startSession(parameters[0], parameters[1], parameters[2], parameters[3], false))
+      promise.resolve(startResult(
+        createSession(parameters[0], parameters[1], parameters[2], parameters[3], false)))
     } catch (error: Throwable) {
       promise.reject("E_START", error)
     }
   }
 
+  private fun startResult(session: Session): WritableMap = Arguments.createMap().apply {
+    putString("sessionId", session.id)
+    putBoolean("adopted", session.adopted)
+    putBoolean("nativeEndedBeforeAdoption", session.nativeEndedBeforeAdoption)
+  }
+
   @Synchronized fun startSession(
     duration: Int, frequency: Int, size: Int, timeout: Int, awaitingAdoption: Boolean
-  ): String {
+  ): String = createSession(duration, frequency, size, timeout, awaitingAdoption).id
+
+  private fun createSession(
+    duration: Int, frequency: Int, size: Int, timeout: Int, awaitingAdoption: Boolean
+  ): Session {
     check(Build.VERSION.SDK_INT >= 35) { "Native sampling requires Android 15 (API 35) or newer" }
     check(active == null && !legacyActive) { "A profiling session is already active" }
     require(duration > 0 && frequency > 0 && size > 0 && timeout > 0) {
@@ -161,7 +219,7 @@ internal class ProfilingSessions(private val context: Context) {
     val session = prepare(duration, frequency, size, timeout)
     session.awaitingAdoption = awaitingAdoption
     if (!awaitingAdoption) startHermes(session)
-    return session.id
+    return session
   }
 
   private fun startHermes(session: Session) {
@@ -179,11 +237,23 @@ internal class ProfilingSessions(private val context: Context) {
     }
   }
 
+  /**
+   * Bounds app-private storage: deletes all but the newest [keep] finished session directories.
+   * Copies exported to Downloads are separate files and are never touched.
+   */
+  private fun pruneSessions(root: File, keep: Int) {
+    val dirs = root.listFiles { file -> file.isDirectory && SESSION_ID.matches(file.name) } ?: return
+    dirs.filter { it != active?.directory }.sortedByDescending { it.lastModified() }.drop(keep)
+      .forEach { it.deleteRecursively() }
+  }
+
   private fun prepare(duration: Int, frequency: Int, size: Int, timeout: Int): Session {
     val id = UUID.randomUUID().toString()
-    val dir = File(context.filesDir, "release-profiler/$id")
+    val root = File(context.filesDir, "release-profiler")
+    runCatching { pruneSessions(root, KEPT_SESSIONS - 1) }
+    val dir = File(root, id)
     check(dir.mkdirs()) { "Cannot create profiling session directory" }
-    val session = Session(id, dir, timeout.toLong())
+    val session = Session(id, dir, duration, timeout.toLong())
     session.requestedOptions.put("durationMs", duration).put("samplingFrequencyHz", frequency)
       .put("bufferSizeKb", size).put("resultTimeoutMs", timeout)
     active = session
@@ -301,13 +371,17 @@ internal class ProfilingSessions(private val context: Context) {
         .put("nativeStatus", session.nativeStatus)
         .put("nativeError", session.nativeError ?: JSONObject.NULL)
         .put("nativeErrorCode", session.nativeErrorCode ?: JSONObject.NULL)
+        .put("adopted", session.adopted)
+        .put("nativeEndedBeforeAdoption", session.nativeEndedBeforeAdoption)
+        .put("ignoredOptions", session.ignoredOptions ?: JSONObject.NULL)
         .put("clockAnchors", session.anchors).put("boundaries", session.boundaries)
       val file = File(session.directory, "session.json")
       file.writeText(manifest.toString(2))
       val uris = mutableListOf<String>()
       if (session.saveToDownloads) {
         for (artifact in listOfNotNull(session.hermesFile, session.nativeFile, file)) {
-          uris.add(exportFile(session.id, artifact))
+          uris.add(exportToDownloads(context, artifact,
+            "${Environment.DIRECTORY_DOWNLOADS}/release-profiler/${session.id}"))
         }
       }
       artifacts = Arguments.createMap().apply {
@@ -319,6 +393,10 @@ internal class ProfilingSessions(private val context: Context) {
         putString("nativeError", session.nativeError)
         session.nativeErrorCode?.let { putInt("nativeErrorCode", it) } ?: putNull("nativeErrorCode")
         putArray("downloadUris", Arguments.createArray().also { array -> uris.forEach { array.pushString(it) } })
+        // False: only in app-private storage, which adb cannot read on a release build.
+        putBoolean("savedToDownloads", session.saveToDownloads)
+        putBoolean("adopted", session.adopted)
+        putBoolean("nativeEndedBeforeAdoption", session.nativeEndedBeforeAdoption)
       }
     } catch (error: Exception) {
       if (active === session) active = null
@@ -331,29 +409,5 @@ internal class ProfilingSessions(private val context: Context) {
     }
     // Deliver after releasing session ownership and its monitor.
     worker.execute { completion.resolve(artifacts) }
-  }
-
-  @TargetApi(29)
-  private fun exportFile(id: String, file: File): String {
-    val resolver = context.contentResolver
-    val values = ContentValues().apply {
-      put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
-      put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-      put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/release-profiler/$id")
-      put(MediaStore.MediaColumns.IS_PENDING, 1)
-    }
-    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-      ?: throw IllegalStateException("Cannot create Downloads artifact")
-    try {
-      resolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
-        ?: throw IllegalStateException("Cannot open Downloads artifact")
-      values.clear()
-      values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-      resolver.update(uri, values, null, null)
-      return uri.toString()
-    } catch (error: Exception) {
-      resolver.delete(uri, null, null)
-      throw error
-    }
   }
 }
