@@ -79,6 +79,76 @@ export function assertSourceMapMatchesProfile(
   }
 }
 
+const BASE64 =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function decodeVlq(segment: string): number[] {
+  const values: number[] = [];
+  let value = 0;
+  let shift = 0;
+  for (const char of segment) {
+    const digit = BASE64.indexOf(char);
+    if (digit < 0) return [];
+    value += (digit & 31) << shift;
+    if (digit & 32) shift += 5;
+    else {
+      values.push(value & 1 ? -(value >>> 1) : value >>> 1);
+      value = 0;
+      shift = 0;
+    }
+  }
+  return values;
+}
+
+interface FunctionRange {
+  line: number;
+  column: number;
+  name: string;
+}
+
+/** Metro's per-source function map (`x_facebook_sources[i][0]`): the name of the function
+ * that encloses each source range. `;` separates lines; each segment is column (relative within
+ * the line), name index (relative) and, on a line's first segment, the line delta.
+ */
+export function decodeFunctionMap(map: {
+  names: string[];
+  mappings: string;
+}): FunctionRange[] {
+  const ranges: FunctionRange[] = [];
+  let line = 1;
+  let name = 0;
+  for (const lineMappings of map.mappings.split(';')) {
+    let column = 0;
+    let first = true;
+    for (const segment of lineMappings.split(',')) {
+      if (!segment) continue;
+      const [columnDelta = 0, nameDelta = 0, lineDelta] = decodeVlq(segment);
+      column += columnDelta;
+      name += nameDelta;
+      if (first && lineDelta !== undefined) line += lineDelta;
+      first = false;
+      const resolved = map.names[name];
+      if (resolved !== undefined) ranges.push({ line, column, name: resolved });
+    }
+  }
+  return ranges;
+}
+
+function enclosingFunction(
+  ranges: FunctionRange[] | undefined,
+  line: number,
+  column: number
+): string | undefined {
+  if (!ranges) return undefined;
+  let found: string | undefined;
+  for (const range of ranges) {
+    if (range.line > line || (range.line === line && range.column > column))
+      break;
+    found = range.name;
+  }
+  return found === '<global>' || found === '<anonymous>' ? undefined : found;
+}
+
 /** Resolve every Hermes stack frame to its original function and source position. */
 export async function symbolicateFrames(
   profile: HermesProfile,
@@ -94,6 +164,20 @@ export async function symbolicateFrames(
   let symbolicatedFrames = 0;
   let unmappedFrames = 0;
   const consumer = await new SourceMapConsumer(rawSourceMap);
+  // Function names come from Hermes (and Metro's function map for anonymous functions),
+  // never from source-map `names`: those are identifier tokens at the mapped position
+  // (`JSON`, `i`, a callee) rather than the function that was executing.
+  const functionMaps = new Map<string, FunctionRange[]>();
+  const rawSources: string[] = rawSourceMap.sources ?? [];
+  const consumerSources: string[] = (consumer as any).sources ?? [];
+  rawSources.forEach((source, i) => {
+    const functionMap = rawSourceMap.x_facebook_sources?.[i]?.[0];
+    if (!functionMap?.mappings || !Array.isArray(functionMap.names)) return;
+    const ranges = decodeFunctionMap(functionMap);
+    functionMaps.set(source, ranges);
+    if (consumerSources.length === rawSources.length && consumerSources[i])
+      functionMaps.set(consumerSources[i]!, ranges);
+  });
   try {
     for (const [key, frame] of Object.entries(profile.stackFrames)) {
       // Debug (source) profiles embed "(bundleURL:line:col)" in the name; the mapped
@@ -141,7 +225,15 @@ export async function symbolicateFrames(
       ) {
         const original = consumer.originalPositionFor({ line, column });
         if (original.source !== null && original.line !== null) {
-          const name = original.name || fn;
+          const anonymous = fn === '(anonymous)' || /^\?anon_\d+_$/.test(fn);
+          const name =
+            (anonymous &&
+              enclosingFunction(
+                functionMaps.get(original.source),
+                original.line,
+                original.column ?? 0
+              )) ||
+            fn;
           const originalColumn = (original.column ?? 0) + 1;
           const definition =
             start && Number.isSafeInteger(start.column) && start.column >= 0
