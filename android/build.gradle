@@ -15,7 +15,12 @@ buildscript {
 }
 
 apply plugin: "com.android.library"
-apply plugin: "kotlin-android"
+// AGP 9 ships built-in Kotlin (android.builtInKotlin) and registers the `kotlin`
+// extension itself; applying kotlin-android on top fails with "Cannot add
+// extension with name 'kotlin'". Only apply it when nothing registered it yet.
+if (project.extensions.findByName("kotlin") == null) {
+  apply plugin: "kotlin-android"
+}
 
 def getExtOrDefault(name) {
   return rootProject.ext.has(name) ? rootProject.ext.get(name) : project.properties["ReleaseProfiler_" + name]
@@ -93,10 +98,6 @@ android {
     disable "GradleCompatible"
   }
 
-  kotlinOptions {
-    jvmTarget = "11"
-  }
-
   compileOptions {
     sourceCompatibility JavaVersion.VERSION_11
     targetCompatibility JavaVersion.VERSION_11
@@ -123,8 +124,15 @@ dependencies {
 
 // RN chooses Java 11 on older releases and Java 17 on current releases. Keep the
 // Kotlin bytecode target aligned after the host plugin finalizes its Java settings.
+// Works with both the Kotlin Gradle plugin and AGP 9 built-in Kotlin, where the
+// android.kotlinOptions DSL no longer exists.
 androidComponents.finalizeDsl { extension ->
-  tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-    kotlinOptions.jvmTarget = extension.compileOptions.targetCompatibility.toString()
+  tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
+    def target = extension.compileOptions.targetCompatibility.toString()
+    if (task.hasProperty("compilerOptions")) {
+      task.compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(target))
+    } else {
+      task.kotlinOptions.jvmTarget = target
+    }
   }
 }
