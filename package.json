@@ -15,6 +15,7 @@
     "ios",
     "cpp",
     "img",
+    "skills",
     "*.podspec",
     "!ios/build",
     "!android/build",
