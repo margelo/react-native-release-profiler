@@ -6,7 +6,8 @@ import os from 'os';
 import type { SourceMap } from '@margelo/hermes-profile-transformer';
 import type { MetroBundleOptions } from './getMetroBundleOptions';
 import type { HermesProfile } from './mergeProfiles';
-import { assertSourceMapMatchesProfile } from './symbolicate';
+import { assertSourceMapMatchesProfile, isBytecodeFrame } from './symbolicate';
+import { logger } from './logger';
 
 type Config = any;
 
@@ -36,15 +37,15 @@ async function getSourcemapFromServer(
   port: string,
   { platform, dev, minify, host }: MetroBundleOptions
 ): Promise<SourceMap | undefined> {
-  console.log('Getting source maps from Metro packager server');
+  logger.info('Getting source maps from Metro packager server');
 
   const requestURL = `http://${host}:${port}/index.map?platform=${platform}&dev=${dev}&minify=${minify}`;
-  console.log(`Downloading from ${requestURL}`);
+  logger.info(`Downloading from ${requestURL}`);
   try {
     const res = await fetch(requestURL);
     const data = await res.json();
     if (typeof data !== 'object') {
-      console.log(
+      logger.warn(
         `Failed to fetch source map from "${requestURL}", unexpected response format.`
       );
       return undefined;
@@ -52,7 +53,7 @@ async function getSourcemapFromServer(
 
     return data as SourceMap;
   } catch {
-    console.log(`Failed to fetch source map from "${requestURL}"`);
+    logger.warn(`Failed to fetch source map from "${requestURL}"`);
     return undefined;
   }
 }
@@ -69,14 +70,14 @@ export async function generateSourcemap(
   const sourceMapResult = await getSourcemapFromServer(port, bundleOptions);
 
   if (sourceMapResult) {
-    console.log('Using source maps from Metro packager server');
+    logger.info('Using source maps from Metro packager server');
     writeJsonSync(sourceMapPath, sourceMapResult);
-    console.log(
+    logger.info(
       `Successfully obtained the source map and stored it in ${sourceMapPath}`
     );
     return sourceMapPath;
   } else {
-    console.log('Error: Cannot obtain source maps from Metro packager server');
+    logger.warn('Cannot obtain source maps from Metro packager server');
     return undefined;
   }
 }
@@ -87,7 +88,7 @@ export function isBytecodeProfile(profile: HermesProfile): boolean {
   const frames = Object.values(profile.stackFrames ?? {}).filter(
     (frame) => frame.category === 'JavaScript'
   );
-  const bytecode = frames.filter((f) => f.funcVirtAddr !== undefined).length;
+  const bytecode = frames.filter(isBytecodeFrame).length;
   return bytecode > frames.length - bytecode;
 }
 
@@ -194,15 +195,15 @@ export async function findSourcemap(
     if (profile) {
       const fit = sourceMapFits(candidate, profile);
       if (!fit.ok) {
-        console.log(`Skipping source map ${candidate}: ${fit.reason}`);
+        logger.info(`Skipping source map ${candidate}: ${fit.reason}`);
         continue;
       }
     }
-    console.log(`Getting the source map from ${candidate}`);
+    logger.info(`Getting the source map from ${candidate}`);
     return candidate;
   }
   if (profile && isBytecodeProfile(profile)) {
-    console.log(
+    logger.warn(
       'No source map matching this release profile was found. Pass --sourcemap-path with the composed map of the exact build (android/app/build/generated/sourcemaps/react/release/index.android.bundle.map).'
     );
     return undefined;

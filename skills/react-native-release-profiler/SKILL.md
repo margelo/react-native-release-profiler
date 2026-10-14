@@ -130,6 +130,8 @@ matter, record 2–3 runs of each version. Report the before/after numbers to th
 | `E_SOURCEMAP_UNRESOLVED` | Map resolved nothing (e.g. a dev-server map for a release build) | Use the composed release map |
 | `E_HERMES_PROFILE` / `E_TRACE_FORMAT` | Corrupt or truncated input | Re-pull / re-record |
 | `E_OUTPUT_CONFLICT` | Output would overwrite an input | Choose another `--output` |
+| `E_DOCTOR_FAILED` | `doctor` ran and at least one check failed (`result.checks`) | Apply each failing check's `fix` |
+| `E_NO_PROFILE` | Legacy flow: no matching `.cpuprofile` on the device | Call `stopProfiling(true)` in the app, or pass `--filename` |
 
 ## Pitfalls
 

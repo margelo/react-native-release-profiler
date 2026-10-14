@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import path from 'path';
+import { logger } from './logger';
 
 interface Config {
   project: {
@@ -10,6 +11,8 @@ interface Config {
   root: string;
 }
 
+/** `react-native config` of the project in the working directory. Rejects without printing:
+ * callers decide whether the config is required. */
 function getConfig(): Promise<Config | null> {
   return new Promise((resolve, reject) => {
     // RN 0.80+ restricts package exports, so resolve cli.js next to package.json.
@@ -21,9 +24,9 @@ function getConfig(): Promise<Config | null> {
     execFile(
       process.execPath,
       [reactNativePath, 'config'],
+      { maxBuffer: 64 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
-          console.error(`exec error: ${error}`);
           reject(error);
           return;
         }
@@ -32,10 +35,11 @@ function getConfig(): Promise<Config | null> {
           const config = JSON.parse(stdout);
           resolve(config);
         } catch (e) {
-          console.error(
-            `Failed to parse the output of "npx react-native config" to JSON. Are you sure the output returns a JSON-only string?\nError: ${e}`
+          reject(
+            new Error(
+              `Failed to parse the output of "npx react-native config" to JSON. Are you sure the output returns a JSON-only string?\nError: ${e}`
+            )
           );
-          reject(e);
           return;
         }
 
@@ -43,10 +47,9 @@ function getConfig(): Promise<Config | null> {
         // that loading the config went fine. We still want to inform about any warnings or errors
         // that might have occured along the way:
         if (stderr) {
-          console.warn(
-            "The following problem occured during retrieving the app's config:"
+          logger.warn(
+            `The following problem occured during retrieving the app's config:\n${stderr}`
           );
-          console.warn(stderr);
         }
       }
     );
