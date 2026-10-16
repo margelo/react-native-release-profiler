@@ -157,7 +157,9 @@ export async function flattenSourceMap(file: string): Promise<string> {
 /**
  * Find the source map for `profile`: the composed release map first, then debug maps, each
  * checked against the profile. Release (bytecode) profiles never use the Metro dev server,
- * whose maps describe a different bundle.
+ * whose maps describe a different bundle. Source-position (debug, web) profiles never use
+ * release maps: release builds run bytecode, and a map without function offsets can't be
+ * checked against such a profile, so a stale release build's map would mislabel every frame.
  */
 export async function findSourcemap(
   ctx: Config,
@@ -166,7 +168,9 @@ export async function findSourcemap(
   profile?: HermesProfile
 ): Promise<string | undefined> {
   const root = ctx?.root ?? process.cwd();
-  const candidates = ['release', 'debug'].flatMap((variant) => [
+  const variants =
+    profile && !isBytecodeProfile(profile) ? ['debug'] : ['release', 'debug'];
+  const candidates = variants.flatMap((variant) => [
     path.join(
       root,
       'android',
