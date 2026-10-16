@@ -6,6 +6,7 @@ import android.os.CancellationSignal
 import android.os.ProfilingManager
 import android.os.ProfilingResult
 import androidx.annotation.RequiresApi
+import java.io.File
 import java.util.concurrent.Executor
 
 /** Android 15 types stay in this class so ProfilingSessions loads cleanly on older devices. */
@@ -36,8 +37,20 @@ internal object NativeSampler {
       if (code == ProfilingResult.ERROR_NONE && path != null) {
         onResult(code, null, path)
       } else {
+        discardOutput(context, tag, path)
         onResult(code, describe(code, result.errorMessage), null)
       }
+    }
+  }
+
+  /** A failed capture can still leave its (empty) output file in files/profiling/. */
+  private fun discardOutput(context: Context, tag: String, path: String?) {
+    runCatching {
+      path?.let { File(it).delete() }
+      // ProfilingManager names outputs profile_<tag, at most 20 characters>_<time>.<type>.
+      File(context.filesDir, "profiling")
+        .listFiles { file -> file.name.startsWith("profile_${tag.take(20)}_") }
+        ?.forEach { it.delete() }
     }
   }
 
