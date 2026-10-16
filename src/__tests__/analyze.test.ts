@@ -171,6 +171,32 @@ describe('analyzeProfiles', () => {
     ]);
   });
 
+  it('resolves project-relative sources ("/src/app.ts", Expo) against the project', () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-expo-'));
+    fs.mkdirSync(path.join(project, 'src'));
+    fs.writeFileSync(path.join(project, 'src', 'app.ts'), '');
+    const expoFrames = new Map(
+      [...frames].map(([key, frame]) => [
+        key,
+        frame.source ? { ...frame, source: '/src/app.ts' } : frame,
+      ])
+    );
+    const locations = (sourceBases?: string[]) =>
+      analyzeProfiles({
+        profile: profile('iinnnnneeiii'),
+        frames: expoFrames,
+        symbolicatedFrames: 2,
+        unmappedFrames: 0,
+        longTaskMs: 50,
+        top: 10,
+        root: project,
+        sourceBases,
+      }).js.topFunctions.map((f) => f.location);
+    expect(locations([project])).toEqual(['src/app.ts:10']);
+    // Not on disk under any base: reported as the map lists it.
+    expect(locations([os.tmpdir()])).toEqual(['/src/app.ts:10']);
+  });
+
   it('counts GC time', () => {
     expect(run('iinngnnii').js.gcMs).toBe(10);
   });

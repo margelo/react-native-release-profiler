@@ -73,6 +73,28 @@ describe('findSourcemap', () => {
       await findSourcemap({ root }, '1', options, releaseProfile)
     ).toBeUndefined();
   });
+
+  it("never uses a release build's packager map for a debug (source-position) profile", async () => {
+    const debugProfile = {
+      samples: [],
+      stackFrames: {
+        1: {
+          name: 'parseCatalog(http://localhost:8081/index.bundle:120:3)',
+          category: 'JavaScript',
+          line: '120',
+          column: '3',
+          funcLine: '120',
+          funcColumn: '1',
+        },
+      },
+    } as unknown as HermesProfile;
+    const root = project({ [packager]: PACKAGER });
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    // Falls through to Metro (port 1 fails) instead of the stale release map.
+    expect(
+      await findSourcemap({ root }, '1', options, debugProfile)
+    ).toBeUndefined();
+  });
 });
 
 describe('sourceMapFits', () => {

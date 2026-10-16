@@ -178,6 +178,14 @@ export interface AnalyzeOptions {
   root?: string;
 }
 
+/** The app project that contains the source map (nearest directory with package.json). */
+function projectOf(file: string): string | undefined {
+  for (let dir = path.dirname(path.resolve(file)); ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    if (path.dirname(dir) === dir) return undefined;
+  }
+}
+
 export async function analyze(
   options: AnalyzeOptions
 ): Promise<AnalysisReport> {
@@ -238,6 +246,10 @@ export async function analyze(
       longTaskMs: options.longTaskMs ?? 50,
       top: options.top ?? 15,
       root: options.root ?? process.cwd(),
+      sourceBases: [
+        projectOf(options.sourceMap),
+        options.root ?? process.cwd(),
+      ].filter((base): base is string => !!base),
       sourceMapSha1: crypto
         .createHash('sha1')
         .update(sourceMapText)
@@ -270,6 +282,8 @@ export function analyzeProfiles(input: {
   longTaskMs: number;
   top: number;
   root: string;
+  /** Directories that project-relative sources such as "/src/App.tsx" are resolved against. */
+  sourceBases?: string[];
   sourceMapSha1?: string;
   /** Original source text (from the map's sourcesContent) for code excerpts. */
   sourceText?: (source: string) => string | undefined;
@@ -280,12 +294,27 @@ export function analyzeProfiles(input: {
   const session = manifest
     ? validateSession(manifest, profile, input.nativeTrace)
     : undefined;
+  // Metro with a server root (Expo) lists sources relative to the project, e.g.
+  // "/src/App.tsx": resolve them against the project so the reported paths can be opened.
+  const onDisk = new Map<string, string>();
+  const resolveSource = (file: string) => {
+    let found = onDisk.get(file);
+    if (found === undefined) {
+      found =
+        path.isAbsolute(file) && !fs.existsSync(file)
+          ? (input.sourceBases ?? [])
+              .map((base) => path.join(base, file))
+              .find((candidate) => fs.existsSync(candidate)) ?? file
+          : file;
+      onDisk.set(file, found);
+    }
+    return found;
+  };
   const source = (frame: SymbolicatedFrame) => {
     if (!frame.source) return null;
-    const relative = path.isAbsolute(frame.source)
-      ? path.relative(root, frame.source)
-      : frame.source;
-    return relative.startsWith('..') ? frame.source : relative;
+    const file = resolveSource(frame.source);
+    const relative = path.isAbsolute(file) ? path.relative(root, file) : file;
+    return relative.startsWith('..') ? file : relative;
   };
   // Hermes reports the innermost interpreted frame at its function start: bytecode offset 0
   // (release) or, in debug profiles, the function's own start position. That is not a line

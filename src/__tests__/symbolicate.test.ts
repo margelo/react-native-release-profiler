@@ -78,6 +78,7 @@ describe('symbolicateFrames naming', () => {
   add(105, 60, 4, 'JSON'); // sampled statement: the token is `JSON`, not the function
   add(300, 291, 18);
   add(304, 292, 6, 'onCommitted');
+  add(306, 60, 4, 'JSON'); // parseCatalog's statement, inlined into the callback by Hermes
   const map = {
     ...JSON.parse(generator.toString()),
     x_facebook_sources: [[functionMap]],
@@ -99,6 +100,7 @@ describe('symbolicateFrames naming', () => {
         funcVirtAddr: '300',
         offset: '4',
       },
+      4: { name: '', category: 'JavaScript', funcVirtAddr: '300', offset: '6' },
     },
   } as unknown as HermesProfile;
 
@@ -117,6 +119,15 @@ describe('symbolicateFrames naming', () => {
     const { frames } = await symbolicateFrames(profile, JSON.stringify(map));
     expect(frames.get('2')!.function).toBe('useLayoutEffect$argument_0');
     expect(frames.get('3')!.function).toBe('useLayoutEffect$argument_0');
+  });
+
+  it('names an anonymous function after itself when it samples inlined code', async () => {
+    const { frames } = await symbolicateFrames(profile, JSON.stringify(map));
+    expect(frames.get('4')).toMatchObject({
+      function: 'useLayoutEffect$argument_0',
+      line: 60,
+      functionLine: 291,
+    });
   });
 
   it('keeps the Hermes name when the map has no function map', async () => {
@@ -203,6 +214,50 @@ describe('source map acceptance', () => {
     expect(sourceMapMatchAccepted({ checked: 10, matched: 8 })).toBe(true);
     expect(sourceMapMatchAccepted({ checked: 10, matched: 7 })).toBe(false);
     expect(sourceMapMatchAccepted({ checked: 0, matched: 0 })).toBe(true);
+  });
+
+  // RN 0.88 short capture: Hermes' internal Promise functions report addresses between the
+  // app's functions (27776 > the first app function), not below them.
+  const internalPromise = [
+    bytecode(17000, 8, 'tryCallOne'),
+    bytecode(17030, 12, 'tryCallTwo'),
+    bytecode(17064, 40, 'Promise'),
+    bytecode(27137, 62, ''),
+  ];
+
+  it('does not count Hermes-internal or unnamed unlisted functions against the map', () => {
+    const profile = profileOf(
+      ...[10000, 20000, 30000].map((a) => bytecode(a)),
+      ...internalPromise
+    );
+    expect(sourceMapMatch(map, profile)).toEqual({ checked: 3, matched: 3 });
+    expect(() => assertSourceMapMatchesProfile(map, profile)).not.toThrow();
+  });
+
+  it('still rejects a map when named app functions are unlisted', () => {
+    const profile = profileOf(
+      bytecode(10000),
+      bytecode(41000, 0, 'formatRow'),
+      bytecode(42000, 0, 'parseCatalog'),
+      ...internalPromise
+    );
+    expect(() => assertSourceMapMatchesProfile(map, profile)).toThrow(
+      'only 1 of 3 sampled Hermes functions'
+    );
+  });
+
+  it('labels named Hermes-internal frames as internal, not unmapped', async () => {
+    const { frames, unmappedFrames } = await symbolicateFrames(
+      profileOf(
+        bytecode(10000),
+        bytecode(20000),
+        ...internalPromise.slice(0, 2)
+      ),
+      JSON.stringify(map)
+    );
+    expect(frames.get('3')!.name).toBe('tryCallOne [Hermes internal]');
+    expect(frames.get('4')!.name).toBe('tryCallTwo [Hermes internal]');
+    expect(unmappedFrames).toBe(0);
   });
 
   it('rejects a real debug capture shape (58 source + 2 bytecode frames) as a debug build', () => {
