@@ -86,10 +86,42 @@ function isSourceFrame(frame: HermesProfileFrame): boolean {
 interface FunctionStarts {
   listed: Set<number>;
   sorted: number[];
-  /** The first function after the global function (offset 0). Hermes' internal bytecode
-   * (its Promise implementation, ...) reports addresses below this, inside the app's
-   * global function, so they are never app functions. */
+  /** The first function after the global function (offset 0). Addresses below it are
+   * inside the app's global function, so they are Hermes' internal bytecode. */
   first: number;
+}
+
+/** Functions of Hermes' internal bytecode (its Promise implementation). Their addresses are
+ * relative to that bytecode, so they can also fall between app functions (RN 0.88: 27776). */
+const HERMES_INTERNAL_FUNCTIONS = new Set([
+  'Promise',
+  'tryCallOne',
+  'tryCallTwo',
+  'doResolve',
+  'handle',
+  'handleResolved',
+  'finale',
+  'getThen',
+  'safeThen',
+  'valuePromise',
+  'resolve',
+  'reject',
+]);
+
+const isAnonymousName = (name: string | undefined) =>
+  !name || name === '(anonymous)' || /^\?anon_\d+_$/.test(name);
+
+/** A sampled function the map does not list that is Hermes' internal bytecode, either
+ * by address or by name. */
+function isHermesInternal(
+  starts: FunctionStarts,
+  start: number,
+  name: string | undefined
+): boolean {
+  return (
+    !starts.listed.has(start) &&
+    (start < starts.first || HERMES_INTERNAL_FUNCTIONS.has(name ?? ''))
+  );
 }
 
 function functionStarts(map: HermesSourceMap): FunctionStarts | undefined {
@@ -122,6 +154,8 @@ function containingStart(starts: FunctionStarts, pc: number): number {
 
 /** Count sampled bytecode functions (after the app's global function) that start at an
  * offset the map lists. Debug (source) profiles have no bytecode offsets: `checked` is 0.
+ * Unlisted Hermes-internal and unnamed functions are not counted: with the right map they
+ * can only be Hermes' internal bytecode, and named app functions still expose a wrong map.
  */
 export function sourceMapMatch(
   map: HermesSourceMap,
@@ -132,7 +166,14 @@ export function sourceMapMatch(
   const sampled = new Set<number>();
   for (const frame of Object.values(profile.stackFrames ?? {})) {
     const start = bytecodePosition(frame)?.start;
-    if (start !== undefined && start >= starts.first) sampled.add(start);
+    if (start === undefined || start < starts.first) continue;
+    if (
+      !starts.listed.has(start) &&
+      (isAnonymousName(frame.name) ||
+        isHermesInternal(starts, start, frame.name))
+    )
+      continue;
+    sampled.add(start);
   }
   let matched = 0;
   for (const start of sampled) if (starts.listed.has(start)) matched++;
@@ -414,7 +455,9 @@ export async function symbolicateFrames(
                 ? bytecode.pc
                 : containingStart(starts, bytecode.pc);
           if (!starts.listed.has(functionStart))
-            skip = functionStart < starts.first ? 'internal' : 'unlisted';
+            skip = isHermesInternal(starts, functionStart, fn)
+              ? 'internal'
+              : 'unlisted';
         } else if (debugProfile) skip = 'internal';
         line = 1;
         column = bytecode.pc;
@@ -445,7 +488,7 @@ export async function symbolicateFrames(
       ) {
         const original = consumer.originalPositionFor({ line, column });
         if (original.source !== null && original.line !== null) {
-          const anonymous = fn === '(anonymous)' || /^\?anon_\d+_$/.test(fn);
+          const anonymous = isAnonymousName(fn);
           const name =
             (anonymous &&
               enclosingFunction(
