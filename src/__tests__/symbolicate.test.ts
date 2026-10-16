@@ -78,6 +78,7 @@ describe('symbolicateFrames naming', () => {
   add(105, 60, 4, 'JSON'); // sampled statement: the token is `JSON`, not the function
   add(300, 291, 18);
   add(304, 292, 6, 'onCommitted');
+  add(306, 60, 4, 'JSON'); // parseCatalog's statement, inlined into the callback by Hermes
   const map = {
     ...JSON.parse(generator.toString()),
     x_facebook_sources: [[functionMap]],
@@ -99,6 +100,7 @@ describe('symbolicateFrames naming', () => {
         funcVirtAddr: '300',
         offset: '4',
       },
+      4: { name: '', category: 'JavaScript', funcVirtAddr: '300', offset: '6' },
     },
   } as unknown as HermesProfile;
 
@@ -117,6 +119,15 @@ describe('symbolicateFrames naming', () => {
     const { frames } = await symbolicateFrames(profile, JSON.stringify(map));
     expect(frames.get('2')!.function).toBe('useLayoutEffect$argument_0');
     expect(frames.get('3')!.function).toBe('useLayoutEffect$argument_0');
+  });
+
+  it('names an anonymous function after itself when it samples inlined code', async () => {
+    const { frames } = await symbolicateFrames(profile, JSON.stringify(map));
+    expect(frames.get('4')).toMatchObject({
+      function: 'useLayoutEffect$argument_0',
+      line: 60,
+      functionLine: 291,
+    });
   });
 
   it('keeps the Hermes name when the map has no function map', async () => {

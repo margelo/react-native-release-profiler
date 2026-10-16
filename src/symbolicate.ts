@@ -489,21 +489,27 @@ export async function symbolicateFrames(
         const original = consumer.originalPositionFor({ line, column });
         if (original.source !== null && original.line !== null) {
           const anonymous = isAnonymousName(fn);
-          const name =
-            (anonymous &&
-              enclosingFunction(
-                functionMaps.get(original.source),
-                original.line,
-                original.column ?? 0
-              )) ||
-            fn;
-          const originalColumn = (original.column ?? 0) + 1;
           const definition =
             start && Number.isSafeInteger(start.column) && start.column >= 0
               ? consumer.originalPositionFor(start)
               : undefined;
           const defined =
             definition?.source === original.source && definition.line !== null;
+          // Name anonymous functions where they are defined: the sampled position can be
+          // code Hermes inlined from another function, whose name the function map gives.
+          const namedAt =
+            definition?.source && definition.line !== null
+              ? definition
+              : original;
+          const name =
+            (anonymous &&
+              enclosingFunction(
+                functionMaps.get(namedAt.source!),
+                namedAt.line!,
+                namedAt.column ?? 0
+              )) ||
+            fn;
+          const originalColumn = (original.column ?? 0) + 1;
           result = {
             name: `${name} (${original.source}:${original.line}:${originalColumn})`,
             function: name,
