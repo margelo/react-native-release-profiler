@@ -141,7 +141,11 @@ describe('mergeProfileBuffers with damaged native traces', () => {
     original: { line: 10, column: 0 },
     source: 'src/app.ts',
   });
-  const sourceMap = generator.toString();
+  // Composed Hermes maps list function offsets; release profiles require them.
+  const sourceMap = JSON.stringify({
+    ...JSON.parse(generator.toString()),
+    x_hermes_function_offsets: { 0: [0] },
+  });
   const profile = {
     stackFrames: {
       1: { name: '[root]', category: 'root' },

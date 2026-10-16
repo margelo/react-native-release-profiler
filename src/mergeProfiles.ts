@@ -1,9 +1,13 @@
 import fs from 'fs';
 import { toSimpleperf } from './simpleperf';
 import path from 'path';
-import { ProfilerError } from './errors';
+import { ProfilerError, readInputFile } from './errors';
 import { toFolded } from './folded';
-import { symbolicateFrames } from './symbolicate';
+import {
+  readHermesProfile,
+  symbolicateFrames,
+  type SymbolicatedFrame,
+} from './symbolicate';
 import { decodeStackSamples, type StackSample } from './traceSamples';
 import {
   bytes,
@@ -62,6 +66,78 @@ interface Sample {
 export interface HermesProfile {
   stackFrames: Record<string, Frame>;
   samples: Sample[];
+  /** Chrome trace metadata, e.g. `thread_name` events naming the JS thread `mqt_v_js`. */
+  traceEvents?: {
+    name?: string;
+    ph?: string;
+    pid?: number | string;
+    tid?: number | string;
+    args?: { name?: unknown };
+  }[];
+}
+
+/** Export names identify the function, not the sampled statement: flame graphs (Perfetto,
+ * Android Studio, flamegraph.pl, speedscope) merge frames by name, so naming frames after
+ * each sampled `line:col` split one function into several frames and callers by call site.
+ * JS frames become `fn (source:definitionLine)`; distinct functions that would share that
+ * name (several defined on one line of minified code) also get the definition column.
+ * Per-line detail stays in `analyze`.
+ */
+export function functionFrameNames(
+  frames: Map<string, SymbolicatedFrame>
+): Map<string, string> {
+  const defined = (frame: SymbolicatedFrame) =>
+    frame.kind === 'js' &&
+    frame.source !== undefined &&
+    frame.functionLine !== undefined;
+  const base = (frame: SymbolicatedFrame) =>
+    defined(frame)
+      ? `${frame.function} (${frame.source}:${frame.functionLine})`
+      : frame.name;
+  const functions = new Map<string, Set<string>>();
+  for (const frame of frames.values()) {
+    if (!defined(frame)) continue;
+    const name = base(frame);
+    functions.set(
+      name,
+      (functions.get(name) ?? new Set()).add(frame.functionId)
+    );
+  }
+  const names = new Map<string, string>();
+  for (const [key, frame] of frames) {
+    const name = base(frame);
+    names.set(
+      key,
+      (functions.get(name)?.size ?? 0) > 1 && frame.functionColumn !== undefined
+        ? `${frame.function} (${frame.source}:${frame.functionLine}:${frame.functionColumn})`
+        : name
+    );
+  }
+  return names;
+}
+
+/** Thread names Hermes recorded for this process (e.g. `mqt_v_js` for the JS thread). */
+export function hermesThreadNames(
+  profile: HermesProfile,
+  pid: number
+): Map<number, string> {
+  const names = new Map<number, string>();
+  for (const event of profile.traceEvents ?? []) {
+    const tid = Number(event.tid);
+    const name = event.args?.name;
+    if (
+      event.name === 'thread_name' &&
+      event.ph === 'M' &&
+      Number(event.pid) === pid &&
+      Number.isSafeInteger(tid) &&
+      tid > 0 &&
+      tid <= 0x7fffffff &&
+      typeof name === 'string' &&
+      name
+    )
+      names.set(tid, name);
+  }
+  return names;
 }
 
 function integer(value: unknown, label: string): bigint {
@@ -251,7 +327,9 @@ export async function mergeProfileBuffers(
     (ts) => ts >= hermesStart && ts <= last.boot
   ).length;
   const interned: Buffer[] = [];
+  // Hermes frame key -> interned frame; one interned frame per exported name and mapping.
   const frameIds = new Map<string, number>();
+  const namedFrameIds = new Map<string, number>();
   // A dedicated mapping identifies JS frames without inventing native addresses.
   interned.push(
     bytes(17, message(uint(1, 1), bytes(2, '[Hermes JavaScript]')))
@@ -263,23 +341,27 @@ export async function mergeProfileBuffers(
   interned.push(bytes(19, message(uint(1, 2), uint(7, 2))));
   const { frames, symbolicatedFrames, unmappedFrames } =
     await symbolicateFrames(profile, sourceMap);
+  const names = functionFrameNames(frames);
   for (const [key, frame] of frames) {
-    const id = frameIds.size + 1;
-    frameIds.set(key, id);
-    interned.push(bytes(5, message(uint(1, id), bytes(2, frame.name))));
-    interned.push(
-      bytes(
-        6,
-        message(
-          uint(1, id),
-          uint(2, id),
-          uint(3, frame.kind === 'js' ? 1 : 2),
-          uint(4, id)
+    const name = names.get(key)!;
+    const mapping = frame.kind === 'js' ? 1 : 2;
+    let id = namedFrameIds.get(`${mapping}\0${name}`);
+    if (id === undefined) {
+      id = namedFrameIds.size + 1;
+      namedFrameIds.set(`${mapping}\0${name}`, id);
+      interned.push(bytes(5, message(uint(1, id), bytes(2, name))));
+      interned.push(
+        bytes(
+          6,
+          message(uint(1, id), uint(2, id), uint(3, mapping), uint(4, id))
         )
-      )
-    );
+      );
+    }
+    frameIds.set(key, id);
   }
+  // Hermes leaf frame key -> callstack; leaves with the same named frames share one.
   const stacks = new Map<string, number>();
+  const stackIds = new Map<string, number>();
   const samplePackets: Buffer[] = [];
   const sortedSamples = [...profile.samples].sort((a, b) =>
     Number(integer(a.ts, 'timestamp') - integer(b.ts, 'timestamp'))
@@ -316,17 +398,19 @@ export async function mergeProfileBuffers(
         frameIdsInStack.push(id);
         key = frame.parent === undefined ? undefined : String(frame.parent);
       }
-      stackId = stacks.size + 1;
-      stacks.set(leaf, stackId);
-      interned.push(
-        bytes(
-          7,
-          message(
-            uint(1, stackId),
-            ...frameIdsInStack.reverse().map((id) => uint(2, id))
+      const rootFirst = frameIdsInStack.reverse();
+      stackId = stackIds.get(rootFirst.join(','));
+      if (stackId === undefined) {
+        stackId = stackIds.size + 1;
+        stackIds.set(rootFirst.join(','), stackId);
+        interned.push(
+          bytes(
+            7,
+            message(uint(1, stackId), ...rootFirst.map((id) => uint(2, id)))
           )
-        )
-      );
+        );
+      }
+      stacks.set(leaf, stackId);
     }
     samplePackets.push(
       packet(
@@ -336,7 +420,15 @@ export async function mergeProfileBuffers(
         uint(58, 6),
         bytes(
           66,
-          message(uint(2, pid), uint(3, tid), uint(4, stackId), uint(5, 0))
+          // timebase_count 1: Perfetto labels the Hermes callstack track with the
+          // sampling session's counter name only when the counter has values.
+          message(
+            uint(2, pid),
+            uint(3, tid),
+            uint(4, stackId),
+            uint(5, 0),
+            uint(6, 1)
+          )
         )
       )
     );
@@ -351,8 +443,30 @@ export async function mergeProfileBuffers(
       bytes(12, bytes(1, bytes(10, 'Hermes wall-clock samples (not CPU time)')))
     )
   );
+  // Native traces carry no process or thread names; name the app, its main thread and the
+  // threads Hermes knows (the JS thread is `mqt_v_js`) so Perfetto shows them.
+  const threadNames = hermesThreadNames(profile, pid);
+  if (!threadNames.has(pid)) threadNames.set(pid, 'main');
+  const processTree = packet(
+    uint(10, sequence),
+    uint(8, mapTime(sortedSamples[0]!.ts)),
+    uint(58, 6),
+    bytes(
+      2,
+      message(
+        ...(manifest.packageName
+          ? [bytes(1, message(uint(1, pid), bytes(3, manifest.packageName)))]
+          : []),
+        ...[...threadNames]
+          .sort(([a], [b]) => a - b)
+          .map(([tid, name]) =>
+            bytes(2, message(uint(1, tid), bytes(2, name), uint(3, pid)))
+          )
+      )
+    )
+  );
   return {
-    trace: concat([intactTrace, setup, ...samplePackets]),
+    trace: concat([intactTrace, setup, processTree, ...samplePackets]),
     samples: samplePackets.length,
     nativeSamples,
     symbolicatedFrames,
@@ -363,6 +477,95 @@ export async function mergeProfileBuffers(
     skippedNativeSamples: decoded.skipped,
     nativeWarnings: nativeCoverage(native, manifest).warnings,
   };
+}
+
+/** The session consistency checks merge applies, for commands that read a session without
+ * merging it (analyze): parts that don't belong together (another process's native trace, a
+ * Hermes profile from another session, a suspended device) must fail with the same codes as
+ * merge rather than produce plausible-looking numbers. Returns the BOOTTIME − MONOTONIC
+ * offset of the session and how many native stack samples belong to its process.
+ */
+export function validateSession(
+  manifest: ProfileSessionManifest,
+  profile: HermesProfile,
+  nativeTrace?: Buffer
+): { boottimeOffsetNs: bigint; nativeSamples: number } {
+  if (
+    manifest.version !== 1 ||
+    manifest.hermesClock !== 'monotonic' ||
+    !manifest.sessionId
+  ) {
+    throw new ProfilerError(
+      'E_SESSION_MANIFEST',
+      'Unsupported session manifest version or Hermes clock'
+    );
+  }
+  const pid = Number(integer(manifest.pid, 'pid'));
+  if (pid <= 0 || pid > 0x7fffffff)
+    throw new ProfilerError('E_SESSION_MANIFEST', 'Invalid session pid');
+  const mapTime = createClockMapper(manifest.clockAnchors);
+  for (const sample of profile.samples) {
+    if (Number(sample.pid) !== pid)
+      throw new ProfilerError(
+        'E_HERMES_PROFILE',
+        'Hermes sample PID does not match session'
+      );
+    const tid = integer(sample.tid, 'tid');
+    if (!tid || tid > 0x7fffffffn)
+      throw new ProfilerError('E_HERMES_PROFILE', 'Invalid Hermes thread ID');
+    mapTime(sample.ts);
+  }
+  const clocks = manifest.clockAnchors
+    .map((anchor) => ({
+      mono: BigInt(anchor.monotonicNs),
+      boot: BigInt(anchor.boottimeNs),
+    }))
+    .sort((a, b) => (a.mono < b.mono ? -1 : a.mono > b.mono ? 1 : 0));
+  const first = clocks[0]!;
+  const last = clocks[clocks.length - 1]!;
+  const boottimeOffsetNs = first.boot - first.mono;
+  if (!nativeTrace) return { boottimeOffsetNs, nativeSamples: 0 };
+  const { samplePids, stackSampleCounts, sampleTimes } =
+    inspectNativeTrace(nativeTrace);
+  if (samplePids.size && !samplePids.has(pid)) {
+    throw new ProfilerError(
+      'E_WRONG_NATIVE_TRACE',
+      'Native sample PIDs do not match the session; wrong native trace'
+    );
+  }
+  const nativeSamples = stackSampleCounts.get(pid) ?? 0;
+  if (!nativeSamples) return { boottimeOffsetNs, nativeSamples };
+  const nativeTimes = sampleTimes
+    .filter((sample) => sample.pid === pid)
+    .map((sample) => {
+      if (sample.clockId === 6) return sample.timestamp;
+      if (sample.clockId === 3) return sample.timestamp + boottimeOffsetNs;
+      throw new ProfilerError(
+        'E_TRACE_FORMAT',
+        `Unsupported native sample clock ${sample.clockId}; cannot verify session time coverage`
+      );
+    });
+  const nativeRequest = manifest.boundaries?.nativeRequest;
+  const captureStart = nativeRequest
+    ? integer(nativeRequest.boottimeNs, 'nativeRequest.boottimeNs')
+    : first.boot;
+  const nativeResult = manifest.boundaries?.nativeResult;
+  const resultBoot = nativeResult
+    ? integer(nativeResult.boottimeNs, 'nativeResult.boottimeNs')
+    : last.boot;
+  const captureEnd = resultBoot > last.boot ? resultBoot : last.boot;
+  const tolerance = 1000000n;
+  if (
+    !nativeTimes.some(
+      (ts) => ts >= captureStart - tolerance && ts <= captureEnd + tolerance
+    )
+  ) {
+    throw new ProfilerError(
+      'E_WRONG_NATIVE_TRACE',
+      'Native samples do not overlap session clock anchors; wrong native trace for this session'
+    );
+  }
+  return { boottimeOffsetNs, nativeSamples };
 }
 
 /** Read an exported session; artifact paths resolve next to session.json. */
@@ -380,6 +583,16 @@ export function loadSession(session: string): {
       `Cannot read session manifest ${session}: ${(error as Error).message}`
     );
   }
+  if (!manifest || typeof manifest !== 'object')
+    throw new ProfilerError(
+      'E_SESSION_MANIFEST',
+      `${session} is not a session manifest`
+    );
+  if (Array.isArray(manifest.clockAnchors))
+    for (const anchor of manifest.clockAnchors) {
+      integer(anchor?.monotonicNs, 'clockAnchors.monotonicNs');
+      integer(anchor?.boottimeNs, 'clockAnchors.boottimeNs');
+    }
   // Exported sessions live together. Device absolute paths are resolved by basename locally.
   const resolve = (artifact: string | null) =>
     artifact
@@ -427,9 +640,15 @@ export async function mergeSession(options: {
       'Output must not overwrite an input artifact'
     );
   }
+  const profile: HermesProfile = readHermesProfile(hermesPath);
   const result = await mergeProfileBuffers(
-    fs.readFileSync(nativePath),
-    JSON.parse(fs.readFileSync(hermesPath, 'utf8')),
+    readInputFile(
+      nativePath,
+      'E_TRACE_FORMAT',
+      'native trace',
+      'Re-pull the whole session directory'
+    ),
+    profile,
     manifest,
     fs.readFileSync(options.sourceMap, 'utf8')
   );
@@ -445,7 +664,11 @@ export async function mergeSession(options: {
   };
   if (options.format === 'folded') {
     const decoded = decodeStackSamples(result.trace);
-    outputTrace = Buffer.from(toFolded(decoded.samples), 'utf8');
+    const folded = toFolded(decoded.samples, {
+      nativeFrequencyHz: result.nativeFrequencyHz,
+      threadNames: hermesThreadNames(profile, Number(manifest.pid)),
+    });
+    outputTrace = Buffer.from(folded, 'utf8');
     skippedSamples = decoded.skipped;
     count(decoded.samples);
   } else if (options.format !== 'perfetto') {

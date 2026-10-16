@@ -355,16 +355,16 @@ describe('toFolded', () => {
       concat([setup(), sample(1000), sample(2000), sample(3000, { tid: 100 })])
     );
     expect(toFolded(samples)).toBe(
-      'native tid 100 (main);outer [libapp.so];leaf [libapp.so] 1\n' +
-        'native tid 101;outer [libapp.so];leaf [libapp.so] 2\n'
+      'native (CPU samples);main thread;outer [libapp.so];leaf [libapp.so] 1\n' +
+        'native (CPU samples);tid 101;outer [libapp.so];leaf [libapp.so] 2\n'
     );
   });
 
   it('labels the Hermes track and the JS thread, escapes ";" and names libraries', () => {
     expect(toFolded(decodeStackSamples(mixedTrace()).samples)).toBe(
-      'JS (Hermes) tid 101;render;a,b 1\n' +
-        'native tid 100 (main);outer [libapp.so];leaf [libapp.so] 1\n' +
-        'native tid 101 (JS thread);outer [libapp.so];leaf [libapp.so] 1\n'
+      'JS (Hermes wall-clock samples);JS thread;render;a,b 1\n' +
+        'native (CPU samples);JS thread;outer [libapp.so];leaf [libapp.so] 1\n' +
+        'native (CPU samples);main thread;outer [libapp.so];leaf [libapp.so] 1\n'
     );
   });
 });
